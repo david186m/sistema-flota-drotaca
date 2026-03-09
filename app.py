@@ -5,6 +5,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import plotly.express as px
 import os
+import io
+import openpyxl
 
 # --- 1. CONFIGURACIÓN DE PÁGINA (Debe ser la primera línea) ---
 st.set_page_config(page_title="Control de Flota Drotaca", page_icon="🚛", layout="wide")
@@ -41,7 +43,7 @@ def limpiar_numero_logistica(valor):
     except:
         return 0.0
 
-# Colores originales (Modo claro/corporativo para adentro)
+# Colores originales
 def color_gps(val):
     color = '#198754' if val == 'GPS Operativo' else '#DC3545'
     return f'color: {color}; font-weight: bold;'
@@ -59,18 +61,15 @@ def color_taller(val):
     if '⚠️' in val_str: return 'color: #DC3545; font-weight: bold;'
     return ''
 
-# --- 4. PROCESAMIENTO DE DATOS (LÓGICA ORIGINAL + SEGURIDAD NUBE) ---
+# --- 4. PROCESAMIENTO DE DATOS ---
 @st.cache_data(ttl=60)
 def cargar_y_procesar_datos():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # 🔴 NUEVO BLOQUE DE SEGURIDAD PARA INTERNET / LOCAL 🔴
     try:
-        # Intentamos leer desde la caja fuerte de Streamlit (Internet)
         credenciales_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
     except:
-        # Si da error, usamos el archivo físico (Tu computadora local)
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
         
     cliente = gspread.authorize(creds)
@@ -122,12 +121,37 @@ def cargar_y_procesar_datos():
     df_ultimo = df_validos.sort_values('FECHA_DT', ascending=False).drop_duplicates('UNIDAD')
     
     inicio_mes = pd.Timestamp(2026, 3, 1)
-    df_marzo = df_validos[df_validos['FECHA_DT'] >= inicio_mes]
-    recorrido_mes = df_marzo.groupby('UNIDAD').agg(km_min_mes=('KM_LIMPIO', 'min'), km_max_mes=('KM_LIMPIO', 'max')).reset_index()
-    recorrido_mes['Km Mensual Actual'] = recorrido_mes['km_max_mes'] - recorrido_mes['km_min_mes']
     
+    # --- MOTOR MATEMÁTICO: FILTRO DE RUTAS REALES Y ARRANQUE INVISIBLE DE MES ---
+    km_historico = df_validos.groupby(['UNIDAD', 'FECHA_DT'])['KM_LIMPIO'].max().reset_index()
+    km_historico = km_historico.sort_values(['UNIDAD', 'FECHA_DT'])
+    
+    km_historico['Recorrido_Dia'] = km_historico.groupby('UNIDAD')['KM_LIMPIO'].diff().fillna(0)
+    km_mes = km_historico[km_historico['FECHA_DT'] >= inicio_mes]
+    
+    dias_activos_df = km_mes[km_mes['Recorrido_Dia'] >= 70].groupby('UNIDAD').size().reset_index(name='dias_activos')
+    
+    df_mes_actual = df_validos[df_validos['FECHA_DT'] >= inicio_mes]
+    df_mes_anterior = df_validos[df_validos['FECHA_DT'] < inicio_mes]
+    
+    recorrido_mes = df_mes_actual.groupby('UNIDAD').agg(
+        km_max_mes=('KM_LIMPIO', 'max'), 
+        km_min_mes_actual=('KM_LIMPIO', 'min')
+    ).reset_index()
+    
+    cierre_mes_anterior = df_mes_anterior.groupby('UNIDAD').agg(km_cierre_anterior=('KM_LIMPIO', 'max')).reset_index()
+    
+    recorrido_mes = pd.merge(recorrido_mes, cierre_mes_anterior, on='UNIDAD', how='left')
+    recorrido_mes['km_arranque'] = recorrido_mes['km_cierre_anterior'].fillna(recorrido_mes['km_min_mes_actual'])
+    
+    recorrido_mes['Km Mensual Actual'] = recorrido_mes['km_max_mes'] - recorrido_mes['km_arranque']
+    
+    recorrido_mes = pd.merge(recorrido_mes, dias_activos_df, on='UNIDAD', how='left')
+    recorrido_mes['dias_activos'] = recorrido_mes['dias_activos'].fillna(0).apply(lambda x: x if x > 0 else 1)
+    # --- FIN DEL MOTOR MATEMÁTICO ---
+
     df_merge = pd.merge(df_control[['Placa', 'Grupo', 'RUTA']], df_ultimo[['UNIDAD', 'KM_LIMPIO', 'FECHA']], left_on="Placa", right_on="UNIDAD", how="left")
-    df_merge2 = pd.merge(df_merge, recorrido_mes[['UNIDAD', 'Km Mensual Actual']], on="UNIDAD", how="left")
+    df_merge2 = pd.merge(df_merge, recorrido_mes[['UNIDAD', 'Km Mensual Actual', 'dias_activos']], on="UNIDAD", how="left")
     
     if 'Placa' in df_maestro.columns:
         cols_maestro = ['Placa']
@@ -171,50 +195,26 @@ def cargar_y_procesar_datos():
     df_final = df_final.rename(columns={'KM_LIMPIO': 'Km Actual', 'FECHA': 'Última Actualización'})
     df_final['Km Actual'] = df_final['Km Actual'].fillna(0)
     df_final['Km Mensual Actual'] = df_final['Km Mensual Actual'].fillna(0)
+    df_final['dias_activos'] = df_final['dias_activos'].fillna(1)
     df_final['Última Actualización'] = df_final['Última Actualización'].fillna("Sin Registro")
     
-    columnas_orden = ['Placa', 'Modelo', 'Grupo', 'RUTA', 'Estatus_Unidad', 'Estatus GPS', 'Km Actual', 'Km Mensual Actual', 'Última Actualización', 'Observacion', 'Fecha_Inoperativo']
+    columnas_orden = ['Placa', 'Modelo', 'Grupo', 'RUTA', 'Estatus_Unidad', 'Estatus GPS', 'Km Actual', 'Km Mensual Actual', 'dias_activos', 'Última Actualización', 'Observacion', 'Fecha_Inoperativo']
     
     return df_final[columnas_orden], df_taller, hora_sincronizacion
 
-# --- 5. PANTALLA DE LOGIN (CON IMAGEN Y DISEÑO OSCURO) ---
+# --- 5. PANTALLA DE LOGIN ---
 def pantalla_login():
     st.markdown("""
     <style>
-    [data-testid="stApp"] {
-        background: radial-gradient(circle at center, #151b26 0%, #080a0e 100%) !important;
-        color: #ffffff;
-    }
+    [data-testid="stApp"] { background: radial-gradient(circle at center, #151b26 0%, #080a0e 100%) !important; color: #ffffff; }
     [data-testid="stHeader"] { background-color: transparent !important; }
-    [data-testid="stForm"] {
-        background-color: rgba(28, 34, 45, 0.8) !important;
-        border-radius: 20px !important;
-        border: 1px solid rgba(0, 212, 255, 0.2) !important;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(10px) !important;
-        padding: 40px 30px !important;
-    }
-    [data-testid="stForm"] div[data-baseweb="input"] {
-        background-color: rgba(0, 0, 0, 0.3) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 8px !important;
-        transition: all 0.3s ease !important;
-    }
-    [data-testid="stForm"] div[data-baseweb="input"]:focus-within {
-        border-color: #00d4ff !important;
-        box-shadow: 0 0 8px rgba(0, 212, 255, 0.3) !important;
-    }
+    [data-testid="stForm"] { background-color: rgba(28, 34, 45, 0.8) !important; border-radius: 20px !important; border: 1px solid rgba(0, 212, 255, 0.2) !important; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px) !important; padding: 40px 30px !important; }
+    [data-testid="stForm"] div[data-baseweb="input"] { background-color: rgba(0, 0, 0, 0.3) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 8px !important; transition: all 0.3s ease !important; }
+    [data-testid="stForm"] div[data-baseweb="input"]:focus-within { border-color: #00d4ff !important; box-shadow: 0 0 8px rgba(0, 212, 255, 0.3) !important; }
     [data-testid="stForm"] input { color: white !important; }
     [data-testid="stForm"] label p { color: #a0a0a0 !important; font-size: 0.9rem !important; }
-    [data-testid="stFormSubmitButton"] button {
-        background: linear-gradient(45deg, #0056b3, #00d4ff) !important;
-        border: none !important; border-radius: 8px !important; color: white !important;
-        font-weight: bold !important; letter-spacing: 1px !important;
-        transition: transform 0.2s, box-shadow 0.2s !important; width: 100% !important; margin-top: 10px !important;
-    }
-    [data-testid="stFormSubmitButton"] button:hover {
-        transform: translateY(-2px) !important; box-shadow: 0 5px 15px rgba(0, 212, 255, 0.4) !important;
-    }
+    [data-testid="stFormSubmitButton"] button { background: linear-gradient(45deg, #0056b3, #00d4ff) !important; border: none !important; border-radius: 8px !important; color: white !important; font-weight: bold !important; letter-spacing: 1px !important; transition: transform 0.2s, box-shadow 0.2s !important; width: 100% !important; margin-top: 10px !important; }
+    [data-testid="stFormSubmitButton"] button:hover { transform: translateY(-2px) !important; box-shadow: 0 5px 15px rgba(0, 212, 255, 0.4) !important; }
     .login-title { color: #ffffff; font-size: 2.2rem; letter-spacing: 2px; text-align: center; margin-bottom: 5px; font-weight: 600; }
     .login-title span { color: #00d4ff; font-weight: 300; }
     .login-subtitle { color: #a0a0a0; font-size: 0.95rem; text-align: center; margin-bottom: 30px; }
@@ -250,16 +250,13 @@ def pantalla_login():
             
             if boton_ingresar:
                 if usuario_input in usuarios_permitidos and usuarios_permitidos[usuario_input] == password_input:
-                    print(f"[LOG OCULTO] ✅ {usuario_input} ha iniciado sesión. Hora: {obtener_hora_venezuela().strftime('%d/%m/%Y %I:%M:%S %p')}")
                     st.session_state.autenticado = True
                     st.session_state.usuario_actual = usuario_input
                     st.rerun() 
                 else:
                     st.error("Usuario o contraseña incorrectos.")
-                    print(f"[LOG OCULTO] ⚠️ Intento fallido de acceso. Usuario: '{usuario_input}'")
 
-
-# --- 6. PANEL PRINCIPAL (BLANCO CORPORATIVO / LÓGICA ORIGINAL) ---
+# --- 6. PANEL PRINCIPAL ---
 def pantalla_principal():
     st.markdown("""
     <style>
@@ -349,26 +346,131 @@ def pantalla_principal():
                 
             st.divider()
             
+            df_promedios = df_mostrar.copy()
+            
+            df_promedios['Km_Num'] = pd.to_numeric(df_promedios['Km Mensual Actual'], errors='coerce').fillna(0)
+            df_promedios['Odometer_Num'] = pd.to_numeric(df_promedios['Km Actual'], errors='coerce').fillna(0)
+            df_promedios['Dias_Num'] = pd.to_numeric(df_promedios['dias_activos'], errors='coerce').fillna(1)
+            
+            dias_calendario = ahora.day if ahora.day > 0 else 1
+
+            df_promedios['Promedio_Diario_Num'] = df_promedios['Km_Num'] / df_promedios['Dias_Num']
+            ritmo_diario_real = df_promedios['Km_Num'] / dias_calendario
+            df_promedios['Promedio_Semanal_Num'] = ritmo_diario_real * 7
+            df_promedios['Promedio_Mensual_Num'] = df_promedios['Km_Num'] # Ahora es el acumulado real exacto
+
+            def format_kms(val):
+                try:
+                    return f"{int(val):,} Kms".replace(',', '.')
+                except:
+                    return "0 Kms"
+
+            df_promedios['RECORRIDO PROMEDIO DIARIO'] = df_promedios['Promedio_Diario_Num'].apply(format_kms)
+            df_promedios['RECORRIDO PROMEDIO SEMANAL'] = df_promedios['Promedio_Semanal_Num'].apply(format_kms)
+            df_promedios['RECORRIDO PROMEDIO MENSUAL'] = df_promedios['Promedio_Mensual_Num'].apply(format_kms)
+            df_promedios['Km Actual Formato'] = df_promedios['Odometer_Num'].apply(format_kms)
+
+            columnas_finales = [
+                'Placa', 'Modelo', 'Grupo', 'RUTA', 'Estatus_Unidad', 'Estatus GPS', 
+                'Km Actual Formato', 'RECORRIDO PROMEDIO DIARIO', 'RECORRIDO PROMEDIO SEMANAL', 
+                'RECORRIDO PROMEDIO MENSUAL', 'Última Actualización', 'Observacion', 'Fecha_Inoperativo'
+            ]
+            
+            columnas_existentes = [col for col in columnas_finales if col in df_promedios.columns]
+            df_display = df_promedios[columnas_existentes].rename(columns={'Km Actual Formato': 'Km Actual'}).copy()
+
+            # --- EXPORTACIÓN CON PLANTILLA DE EXCEL ---
             col_tabla1, col_tabla2 = st.columns([0.7, 0.3])
             with col_tabla1:
                 st.subheader(f"📑 Reporte Detallado: {seleccion}")
             with col_tabla2:
-                df_descarga = df_mostrar.copy()
-                df_descarga['Km Actual'] = df_descarga['Km Actual'].round(2)
-                df_descarga['Km Mensual Actual'] = df_descarga['Km Mensual Actual'].round(2)
-                csv_data = df_descarga.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-                st.download_button(label="📥 Exportar a Excel", data=csv_data, file_name=f"Reporte_Flota_{seleccion}.csv", mime="text/csv", use_container_width=True)
+                try:
+                    df_export = df_promedios.copy()
+                    
+                    wb = openpyxl.load_workbook("INFORME GERENCIAL.xlsx")
+                    ws = wb.active 
+
+                    titulo_zona = f"INFORME MENSUAL - RUTA {seleccion.upper()} 2026" if seleccion != "Todos los vehículos" else "INFORME MENSUAL - TODA LA FLOTA 2026"
+                    mes_solo = meses_año[ahora.month - 1].upper()
+
+                    ws['E1'] = titulo_zona
+                    ws['J1'] = mes_solo
+
+                    fila_inicio = 3
+                    for index, row in enumerate(df_export.to_dict('records')):
+                        fila_actual = fila_inicio + index
+                        ws.cell(row=fila_actual, column=1, value=index + 1)
+                        ws.cell(row=fila_actual, column=2, value=row.get('Placa', ''))
+                        ws.cell(row=fila_actual, column=3, value=row.get('Modelo', ''))
+                        ws.cell(row=fila_actual, column=4, value=row.get('Grupo', ''))
+                        ws.cell(row=fila_actual, column=5, value=row.get('RUTA', ''))
+                        ws.cell(row=fila_actual, column=6, value=row.get('Estatus_Unidad', ''))
+                        ws.cell(row=fila_actual, column=7, value=row.get('Estatus GPS', ''))
+                        
+                        # Pegado exacto de números para las fórmulas
+                        ws.cell(row=fila_actual, column=8, value=row.get('Odometer_Num', 0)) # CORREGIDO: Ahora es el Odómetro
+                        ws.cell(row=fila_actual, column=9, value=row.get('Promedio_Diario_Num', 0))
+                        ws.cell(row=fila_actual, column=10, value=row.get('Promedio_Semanal_Num', 0))
+                        ws.cell(row=fila_actual, column=11, value=row.get('Promedio_Mensual_Num', 0)) # CORREGIDO: Ahora es el Acumulado Real
+
+                    fila_vacia_inicio = fila_inicio + len(df_export)
+                    for r in range(fila_vacia_inicio, 72):
+                        ws.row_dimensions[r].hidden = True
+
+                    output = io.BytesIO()
+                    wb.save(output)
+                    output.seek(0)
+
+                    st.download_button(
+                        label="📥 Descargar Informe Gerencial",
+                        data=output,
+                        file_name=f"INFORME_GERENCIAL_{seleccion.replace(' ', '_')}_{mes_solo}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                except FileNotFoundError:
+                    st.warning("⚠️ Sube el archivo 'INFORME GERENCIAL.xlsx' a tu carpeta para activar el botón.")
             
+            # Cálculo visual de la fila TOTALES 
+            total_diario_calculado = df_promedios['Promedio_Diario_Num'].sum()
+            total_semanal_calculado = df_promedios['Promedio_Semanal_Num'].sum()
+            total_mensual_calculado = df_promedios['Promedio_Mensual_Num'].sum()
+
+            totals_row = {col: "" for col in df_display.columns}
+            totals_row['Placa'] = "TOTALES"
+            if 'RECORRIDO PROMEDIO DIARIO' in totals_row: totals_row['RECORRIDO PROMEDIO DIARIO'] = format_kms(total_diario_calculado)
+            if 'RECORRIDO PROMEDIO SEMANAL' in totals_row: totals_row['RECORRIDO PROMEDIO SEMANAL'] = format_kms(total_semanal_calculado)
+            if 'RECORRIDO PROMEDIO MENSUAL' in totals_row: totals_row['RECORRIDO PROMEDIO MENSUAL'] = format_kms(total_mensual_calculado)
+
+            df_display = pd.concat([df_display, pd.DataFrame([totals_row])], ignore_index=True)
+
+            def aplicar_estilos_dinamicos(row):
+                styles = [''] * len(row)
+                if row['Placa'] == 'TOTALES':
+                    return ['background-color: #ffff00; color: black; font-weight: bold; font-size: 15px; text-align: center;'] * len(row)
+                    
+                for i, col in enumerate(row.index):
+                    if col == 'Estatus GPS':
+                        styles[i] = color_gps(row[col]) + ' text-align: center;'
+                    elif col == 'Estatus_Unidad':
+                        styles[i] = color_estatus(row[col]) + ' text-align: center;'
+                    elif col == 'RECORRIDO PROMEDIO DIARIO':
+                        styles[i] = 'background-color: #1f497d; color: white; font-weight: bold; text-align: center;'
+                    elif col == 'RECORRIDO PROMEDIO SEMANAL':
+                        styles[i] = 'background-color: #4f81bd; color: white; font-weight: bold; text-align: center;'
+                    elif col == 'RECORRIDO PROMEDIO MENSUAL':
+                        styles[i] = 'background-color: #e46c0a; color: white; font-weight: bold; text-align: center;'
+                    else:
+                        styles[i] = 'text-align: center;'
+                return styles
+
             estilos_tabla = [
                 dict(selector="th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("text-align", "center"), ("font-weight", "bold"), ("font-size", "14px"), ("border", "1px solid white")]),
-                dict(selector="td", props=[("text-align", "center"), ("border", "1px solid #e0e0e0"), ("font-size", "14px")]),
+                dict(selector="td", props=[("border", "1px solid #e0e0e0"), ("font-size", "14px")]),
                 dict(selector="tr:hover", props=[("background-color", "#f2f8ff")])
             ]
 
-            tabla_formateada = df_mostrar.style.format({
-                "Km Actual": "{:,.0f} Kms",       
-                "Km Mensual Actual": "{:,.0f} Kms" 
-            }).set_table_styles(estilos_tabla).map(color_gps, subset=['Estatus GPS']).map(color_estatus, subset=['Estatus_Unidad'])
+            tabla_formateada = df_display.style.apply(aplicar_estilos_dinamicos, axis=1).set_table_styles(estilos_tabla)
 
             st.dataframe(tabla_formateada, use_container_width=True, hide_index=True)
 
