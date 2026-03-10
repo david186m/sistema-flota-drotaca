@@ -97,13 +97,10 @@ def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, m
 
     columnas = df_datos.columns.tolist()
     
-    # REINGENIERÍA DE ANCHOS DE COLUMNA (Se le dio más espacio a UNIDAD)
     if rol == 'Chofer':
-        # Columnas: FECHA, DIA, UNIDAD, RUTA, ZONA, OBSERVACIÓN
-        anchos = [18, 18, 33, 119, 22, 65] # Total 275mm 
+        anchos = [18, 18, 33, 119, 22, 65] 
     else:
-        # Columnas: FECHA, DIA, CHOFER, UNIDAD, RUTA, ZONA, OBSERVACIÓN
-        anchos = [18, 18, 38, 30, 90, 20, 61] # Total 275mm
+        anchos = [18, 18, 38, 30, 90, 20, 61] 
 
     pdf.set_font('Arial', 'B', 9)
     pdf.set_fill_color(230, 230, 230)
@@ -118,7 +115,6 @@ def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, m
             texto = texto.replace("Ñ","N").replace("ñ","n").replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
             texto = texto.replace("Á","A").replace("É","E").replace("Í","I").replace("Ó","O").replace("Ú","U")
             
-            # Recortador ajustado para que permita más letras si la columna es más ancha
             max_chars = int(anchos[i] * 0.70) 
             texto_limpio = texto[:max_chars]
             
@@ -352,9 +348,9 @@ def modulo_flota():
         mes_actual_texto = f"{meses_año[ahora.month - 1]} {ahora.year}"
         
         st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #003366; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; background-color: #ffffff; padding: 15px; border-radius: 8px; border-left: 5px solid #1A3B5C; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <div style="font-size: 15px; margin-bottom: 5px;">
-                🕒 <b>Hora del Sistema:</b> <span style="color: #003366;">{fecha_reloj}</span>
+                🕒 <b>Hora del Sistema:</b> <span style="color: #1A3B5C;">{fecha_reloj}</span>
             </div>
             <div style="font-size: 15px;">
                 📡 <b>Última edición real del documento:</b> <span style="color: #198754; font-weight: bold;">{ultima_sync}</span> <span style="font-size: 13px; color: gray;">(Por el equipo)</span>
@@ -394,10 +390,31 @@ def modulo_flota():
                 eje_x = "Placa"
                 
             km_data = km_data.sort_values(by="Km Mensual Actual", ascending=False)
-            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"{x:,.0f} Kms".replace(",", "X").replace(".", ",").replace("X", "."))
-            fig = px.bar(km_data, x=eje_x, y="Km Mensual Actual", text="Etiqueta")
-            fig.update_traces(textposition='outside', marker_color='#1A3B5C', cliponaxis=False)
-            fig.update_layout(xaxis_title="", yaxis_title="Kilómetros Recorridos", dragmode=False, margin=dict(t=30, b=0, l=0, r=0), height=400)
+            
+            # --- MEJORA VISUAL DEL GRÁFICO ---
+            # Etiquetas en Negrita (<b>)
+            km_data['Eje_X_Display'] = km_data[eje_x].apply(lambda x: f"<b>{x}</b>")
+            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"<b>{x:,.0f} Kms</b>".replace(",", "X").replace(".", ",").replace("X", "."))
+            
+            fig = px.bar(km_data, x="Eje_X_Display", y="Km Mensual Actual", text="Etiqueta")
+            
+            # Tamaño de fuente más grande (14) y color oscuro
+            fig.update_traces(textposition='outside', marker_color='#1A3B5C', cliponaxis=False, textfont=dict(size=14, color='#17375E'))
+            
+            # Fondo transparente para que se adapte al nuevo color de la página
+            fig.update_layout(
+                xaxis_title="", 
+                yaxis_title="<b>Kilómetros Recorridos</b>", 
+                dragmode=False, 
+                margin=dict(t=30, b=0, l=0, r=0), 
+                height=400,
+                xaxis=dict(tickfont=dict(size=13, color='#17375E')),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            # Líneas guía más sutiles
+            fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#E2E8F0')
+            
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
             st.divider()
             
@@ -491,7 +508,7 @@ def modulo_flota():
             def aplicar_estilos_dinamicos(row):
                 styles = [''] * len(row)
                 if row['Placa'] == 'TOTALES':
-                    return ['background-color: #ffff00; color: black; font-weight: bold; text-align: center;'] * len(row)
+                    return ['background-color: #FACC15; color: black; font-weight: bold; text-align: center;'] * len(row)
                 for i, col in enumerate(row.index):
                     if col == 'Estatus GPS': styles[i] = color_gps(row[col]) + ' text-align: center;'
                     elif col == 'Estatus_Unidad': styles[i] = color_estatus(row[col]) + ' text-align: center;'
@@ -513,7 +530,7 @@ def modulo_flota():
     except Exception as e:
         st.error(f"Error cargando los datos de Flota: {e}")
 
-# --- 7. MÓDULO 2: ROTACIÓN DE PERSONAL (CON FILTROS Y PDF AJUSTADO) ---
+# --- 7. MÓDULO 2: ROTACIÓN DE PERSONAL ---
 def modulo_personal():
     col_titulo, col_boton = st.columns([0.8, 0.2])
     with col_titulo:
@@ -531,7 +548,6 @@ def modulo_personal():
             st.warning("⚠️ No se encontraron las hojas 'Rotacion_Choferes' o 'Rotacion_Ayudantes' en Google Sheets.")
             return
 
-        # FILTRO GLOBAL POR MES
         if not df_choferes.empty:
             df_choferes['MES_NUM'] = df_choferes['FECHA_DT'].dt.month
             df_choferes['MES_NOMBRE'] = df_choferes['MES_NUM'].map(MESES_ESPANOL)
@@ -545,7 +561,7 @@ def modulo_personal():
         
         meses_ordenados = sorted(list(meses_disponibles), key=lambda m: list(MESES_ESPANOL.values()).index(m))
 
-        st.markdown("""<div style="background-color: #f8f9fa; padding: 10px 20px; border-radius: 8px; border-left: 5px solid #1A3B5C; margin-bottom: 20px;"></div>""", unsafe_allow_html=True)
+        st.markdown("""<div style="background-color: #ffffff; padding: 10px 20px; border-radius: 8px; border-left: 5px solid #1A3B5C; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"></div>""", unsafe_allow_html=True)
         col_mes1, col_mes2 = st.columns([0.3, 0.7])
         with col_mes1:
             mes_seleccionado = st.selectbox("📅 Filtrar por Mes:", ["Todo el año"] + meses_ordenados)
@@ -559,7 +575,6 @@ def modulo_personal():
         tab_choferes, tab_ayudantes = st.tabs(["🚛 Gestión de Choferes", "👷 Gestión de Ayudantes"])
         estilos_tabla_personal = [dict(selector="th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("text-align", "center")])]
 
-        # --- LÓGICA PARA CHOFERES ---
         with tab_choferes:
             if not df_choferes.empty:
                 lista_choferes = sorted([str(x) for x in df_choferes['CHOFER'].unique() if str(x).strip() != ""])
@@ -584,7 +599,6 @@ def modulo_personal():
                 else:
                     df_ind = df_choferes[df_choferes['CHOFER'] == chofer_sel].copy()
                     
-                    # SUBFILTROS INTELIGENTES PARA CHOFER
                     unidades_disp = ["Todas"] + sorted([str(x) for x in df_ind['UNIDAD'].unique() if str(x).strip() != ""])
                     zonas_disp = ["Todas"] + sorted([str(x) for x in df_ind['ZONA'].unique() if str(x).strip() != ""])
                     
@@ -594,7 +608,6 @@ def modulo_personal():
                     with c_f2:
                         zona_sel = st.selectbox("📍 Filtrar por Zona (Opcional):", zonas_disp, key="z_ch")
                         
-                    # Aplicar subfiltros
                     if unidad_sel != "Todas": df_ind = df_ind[df_ind['UNIDAD'] == unidad_sel]
                     if zona_sel != "Todas": df_ind = df_ind[df_ind['ZONA'] == zona_sel]
                     
@@ -625,7 +638,7 @@ def modulo_personal():
                             zonas_count.columns = ['ZONA', 'Días']
                             fig = px.pie(zonas_count, values='Días', names='ZONA', hole=0.4, color_discrete_sequence=px.colors.sequential.Blues_r)
                             fig.update_traces(textposition='inside', textinfo='percent+label')
-                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300)
+                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300, paper_bgcolor='rgba(0,0,0,0)')
                             st.plotly_chart(fig, use_container_width=True)
                         else:
                             st.info("Sin registros de zona para esta selección.")
@@ -640,7 +653,6 @@ def modulo_personal():
                         pdf_bytes = crear_pdf_operativo(chofer_sel, "Chofer", df_view, total_dias, dias_activos, dias_inactivos, mes_seleccionado, texto_filtros)
                         st.download_button(label=f"📥 Descargar PDF Gerencial", data=pdf_bytes, file_name=f"Perfil_{chofer_sel.replace(' ', '_')}.pdf", mime="application/pdf", use_container_width=True)
 
-        # --- LÓGICA PARA AYUDANTES ---
         with tab_ayudantes:
             if not df_ayudantes.empty:
                 lista_ayudantes = sorted([str(x) for x in df_ayudantes['AYUDANTE'].unique() if str(x).strip() != ""])
@@ -655,7 +667,6 @@ def modulo_personal():
                 else:
                     df_ind = df_ayudantes[df_ayudantes['AYUDANTE'] == ayu_sel].copy()
                     
-                    # SUBFILTROS INTELIGENTES PARA AYUDANTE
                     unidades_disp_a = ["Todas"] + sorted([str(x) for x in df_ind['UNIDAD'].unique() if str(x).strip() != ""])
                     zonas_disp_a = ["Todas"] + sorted([str(x) for x in df_ind['ZONA'].unique() if str(x).strip() != ""])
                     
@@ -695,7 +706,7 @@ def modulo_personal():
                             zonas_count.columns = ['ZONA', 'Días']
                             fig = px.pie(zonas_count, values='Días', names='ZONA', hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
                             fig.update_traces(textposition='inside', textinfo='percent+label')
-                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300)
+                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300, paper_bgcolor='rgba(0,0,0,0)')
                             st.plotly_chart(fig, use_container_width=True)
                         else:
                             st.info("Sin registros de zona para esta selección.")
@@ -713,13 +724,157 @@ def modulo_personal():
     except Exception as e:
         st.error(f"Error cargando los datos de Personal: {e}")
 
+# --- 7.5. MÓDULO 3: TORRE DE CONTROL (DASHBOARD GERENCIAL) ---
+def modulo_torre_control():
+    col_titulo, col_boton = st.columns([0.8, 0.2])
+    with col_titulo:
+        st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA (EN TIEMPO REAL)")
+    with col_boton:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Actualizar Pizarras", use_container_width=True):
+            st.rerun() 
+    st.markdown("---")
+
+    config_pizarras = {
+        "Occidente": {"titulo": "RUTA OCCIDENTE", "responsable": "Jesus Brito"},
+        "Centro": {"titulo": "RUTA CENTRO", "responsable": "Jerald Poche"},
+        "Oriente": {"titulo": "RUTA ORIENTE", "responsable": "Gabriel Vera"}
+    }
+
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    try:
+        credenciales_dict = dict(st.secrets["gcp_service_account"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+    except:
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+        
+    try:
+        cliente = gspread.authorize(creds)
+        libro = cliente.open("Sistema_Flota_2026")
+    except Exception as e:
+        st.error("Error conectando a la base de datos de la Torre de Control.")
+        return
+
+    # FASE 1: RECOPILACIÓN DE DATOS GLOBALES
+    datos_por_zona = {}
+    global_cubiertos = 0
+    global_bultos = 0
+
+    for zona, info_zona in config_pizarras.items():
+        try:
+            ws_zona = libro.worksheet(f"Pizarra_{zona}")
+            datos = ws_zona.get_all_records()
+            if datos:
+                df = pd.DataFrame(datos)
+                
+                hora_act = "No registrada"
+                if "ULTIMA ACTUALIZACION" in df.columns:
+                    hora_act = df["ULTIMA ACTUALIZACION"].iloc[0]
+                    df = df.drop(columns=["ULTIMA ACTUALIZACION"])
+                
+                c_cubiertos = next((c for c in df.columns if 'CUBIERTOS' in str(c).upper()), None)
+                c_bultos = next((c for c in df.columns if 'BULTOS' in str(c).upper()), None)
+                
+                if c_cubiertos: global_cubiertos += pd.to_numeric(df[c_cubiertos], errors='coerce').fillna(0).sum()
+                if c_bultos: global_bultos += pd.to_numeric(df[c_bultos], errors='coerce').fillna(0).sum()
+                
+                datos_por_zona[zona] = {"df": df, "hora": hora_act, "responsable": info_zona["responsable"], "titulo": info_zona["titulo"]}
+        except:
+            pass
+
+    # FASE 2: RENDERIZADO DEL RESUMEN GLOBAL (TOP)
+    st.markdown("### 🌎 Resumen Global de Operaciones")
+    fecha_hoy = obtener_hora_venezuela().strftime("%d/%m/%Y")
+    
+    col_g1, col_g2, col_g3 = st.columns(3)
+    col_g1.metric("📅 Despacho del Día", fecha_hoy)
+    col_g2.metric("✅ Total Clientes Cubiertos", f"{int(global_cubiertos)} Clientes")
+    col_g3.metric("📦 Total Bultos Entregados", f"{int(global_bultos)} Bultos")
+    st.markdown("---")
+
+    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES
+    for zona, data in datos_por_zona.items():
+        st.subheader(f"📍 PIZARRA {data['titulo']}")
+        
+        col1, col2 = st.columns([1, 1])
+        with col1: st.info(f"👤 **Responsable:** {data['responsable']}")
+        with col2:
+            if data['hora'] and str(data['hora']).strip() != "" and str(data['hora']).strip() != "nan":
+                st.success(f"⏱️ **Última actualización:** {data['hora']}")
+            else:
+                st.warning("⚠️ **Última actualización:** Pendiente por sincronizar")
+
+        df_zona = data["df"].copy()
+        
+        c_cubrir = next((c for c in df_zona.columns if 'A CUBRIR' in str(c).upper()), None)
+        c_cubiertos = next((c for c in df_zona.columns if 'CUBIERTOS' in str(c).upper()), None)
+        c_pendientes = next((c for c in df_zona.columns if 'PENDIENTES' in str(c).upper()), None)
+        c_bultos = next((c for c in df_zona.columns if 'BULTOS' in str(c).upper()), None)
+        primer_columna = df_zona.columns[0]
+        
+        sum_cubrir = pd.to_numeric(df_zona[c_cubrir], errors='coerce').fillna(0).sum() if c_cubrir else 0
+        sum_cubiertos = pd.to_numeric(df_zona[c_cubiertos], errors='coerce').fillna(0).sum() if c_cubiertos else 0
+        sum_pendientes = pd.to_numeric(df_zona[c_pendientes], errors='coerce').fillna(0).sum() if c_pendientes else 0
+        sum_bultos = pd.to_numeric(df_zona[c_bultos], errors='coerce').fillna(0).sum() if c_bultos else 0
+        
+        efectividad = (sum_cubiertos / sum_cubrir * 100) if sum_cubrir > 0 else 0
+
+        fila_totales = {col: "" for col in df_zona.columns}
+        fila_totales[primer_columna] = "TOTALES"
+        if c_cubrir: fila_totales[c_cubrir] = int(sum_cubrir)
+        if c_cubiertos: fila_totales[c_cubiertos] = int(sum_cubiertos)
+        if c_pendientes: fila_totales[c_pendientes] = int(sum_pendientes)
+        if c_bultos: fila_totales[c_bultos] = int(sum_bultos)
+
+        df_zona = pd.concat([df_zona, pd.DataFrame([fila_totales])], ignore_index=True)
+
+        def estilo_fila_totales(row):
+            styles = [''] * len(row)
+            if row[primer_columna] == 'TOTALES':
+                for i, col in enumerate(row.index):
+                    if col == c_bultos:
+                        styles[i] = 'background-color: #FFFF00; color: black; font-weight: bold; text-align: center; border: 1px solid black;'
+                    else:
+                        styles[i] = 'background-color: #D9E1F2; color: #17375E; font-weight: bold; text-align: center;'
+            else:
+                for i, col in enumerate(row.index):
+                    styles[i] = 'text-align: center;'
+            return styles
+
+        estilos_torre = [dict(selector="th", props=[("background-color", "#17375E"), ("color", "white"), ("text-align", "center")])]
+        
+        col_tabla, col_grafico = st.columns([0.8, 0.2])
+        
+        with col_tabla:
+            st.dataframe(
+                df_zona.style.apply(estilo_fila_totales, axis=1).set_table_styles(estilos_torre),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+        with col_grafico:
+            st.markdown(f"<div style='text-align: center; font-weight: bold; color: #17375E; font-size: 16px;'>EFECTIVIDAD</div>", unsafe_allow_html=True)
+            if sum_cubrir > 0:
+                df_pie = pd.DataFrame({'Estado': ['Entregado', 'Pendiente'], 'Cantidad': [sum_cubiertos, sum_pendientes]})
+                fig = px.pie(df_pie, values='Cantidad', names='Estado', hole=0.4, 
+                             color='Estado', color_discrete_map={'Entregado':'#4F81BD', 'Pendiente':'#C0504D'})
+                fig.update_traces(textposition='inside', textinfo='percent')
+                fig.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=200, paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.info("Sin datos de clientes para calcular efectividad.")
+                
+        st.markdown("<br><br>", unsafe_allow_html=True)
+
 # --- 8. CONTROL DE FLUJO Y NAVEGACIÓN ---
 if not st.session_state.autenticado:
     pantalla_login()
 else:
+    # --- CAMBIO DE COLOR DE FONDO ---
+    # "#F0F4F8" es el nuevo fondo (Alice Blue Corporativo). Color de texto principal #17375E.
     st.markdown("""
     <style>
-    [data-testid="stApp"] { background: #ffffff !important; color: #31333F !important; }
+    [data-testid="stApp"] { background: #F0F4F8 !important; color: #17375E !important; }
     [data-testid="stHeader"] { background-color: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -728,15 +883,42 @@ else:
         st.markdown(f"### 👤 Usuario:\n**{st.session_state.usuario_actual}**")
         st.divider()
         st.markdown("### 🗂️ Módulos del Sistema")
-        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal"])
+        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control"])
+        
+        st.divider()
+        st.markdown("### 🤖 Control de Bots (Pizarras)")
+        try:
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            try:
+                credenciales_dict = dict(st.secrets["gcp_service_account"])
+                creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+            except:
+                creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+            cliente = gspread.authorize(creds)
+            libro_config = cliente.open("Sistema_Flota_2026")
+            ws_config = libro_config.worksheet("Configuracion")
+            estado_actual = str(ws_config.acell('A1').value).strip().upper()
+            
+            bot_activado = st.toggle("Encender Sincronización Automática", value=(estado_actual == "ENCENDIDO"))
+            nuevo_estado = "ENCENDIDO" if bot_activado else "APAGADO"
+            
+            if nuevo_estado != estado_actual:
+                ws_config.update_acell('A1', nuevo_estado)
+                st.toast(f"Estado de los Bots cambiado a: {nuevo_estado}")
+                st.success(f"Bots en {nuevo_estado}")
+        except Exception as e:
+            st.caption("⚠️ No se pudo cargar el estado de los bots. Verifica la hoja 'Configuracion'.")
+
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True, type="primary"):
             st.session_state.autenticado = False
             st.session_state.usuario_actual = ""
             st.rerun()
 
+    # --- RUTEO DE LA APLICACIÓN ---
     if menu_seleccionado == "🚛 Control de Flota":
         modulo_flota()
     elif menu_seleccionado == "👥 Rotación de Personal":
         modulo_personal()
-
+    elif menu_seleccionado == "🗼 Torre de Control":
+        modulo_torre_control()
