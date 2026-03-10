@@ -315,7 +315,7 @@ def pantalla_login():
         else:
             st.warning(f"⚠️ No se encontró el archivo '{nombre_imagen}' en la carpeta.")
 
-        st.markdown("<div class='login-title'>🚛 Monitoreo Integral <span>2026</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='login-title'>🚛 Monitoreo De Flota <span>2026</span></div>", unsafe_allow_html=True)
         st.markdown("<div class='login-subtitle'>Acceso Restringido al Sistema</div><br>", unsafe_allow_html=True)
 
         with st.form("formulario_login"):
@@ -739,3 +739,4 @@ else:
         modulo_flota()
     elif menu_seleccionado == "👥 Rotación de Personal":
         modulo_personal()
+
