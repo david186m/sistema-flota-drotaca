@@ -68,7 +68,19 @@ MESES_ESPANOL = {
     7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
-# --- MOTOR GENERADOR DE PDF ---
+# --- 3.1 LIMPIEZA EXTREMA PARA PDF (EVITAR CRASHES POR UNICODE) ---
+def limpiar_texto_pdf(texto):
+    if pd.isna(texto): return ""
+    texto = str(texto)
+    texto = texto.replace("Ñ","N").replace("ñ","n").replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
+    texto = texto.replace("Á","A").replace("É","E").replace("Í","I").replace("Ó","O").replace("Ú","U")
+    texto = texto.replace('\u2013', '-').replace('\u2014', '-') 
+    texto = texto.replace('\u2018', "'").replace('\u2019', "'") 
+    texto = texto.replace('\u201c', '"').replace('\u201d', '"') 
+    texto = texto.replace('\u2026', '...') 
+    return texto.encode('latin-1', 'replace').decode('latin-1')
+
+# --- MOTOR GENERADOR DE PDF PARA PERSONAL ---
 def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, mes_filtro, extra_filtros=""):
     class PDF(FPDF):
         def header(self):
@@ -83,12 +95,12 @@ def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, m
     
     pdf.set_font('Arial', 'B', 12)
     pdf.set_text_color(0, 0, 0)
-    nombre_safe = nombre.replace("Ñ", "N").replace("ñ", "n") 
+    nombre_safe = limpiar_texto_pdf(nombre)
     pdf.cell(0, 6, f"Perfil Operativo: {nombre_safe}", 0, 1)
     
     pdf.set_font('Arial', 'B', 9)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, f"Periodo: {mes_filtro} {extra_filtros}", 0, 1)
+    pdf.cell(0, 5, f"Periodo: {limpiar_texto_pdf(mes_filtro)} {limpiar_texto_pdf(extra_filtros)}", 0, 1)
 
     pdf.set_font('Arial', '', 10)
     pdf.set_text_color(0, 0, 0)
@@ -105,21 +117,70 @@ def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, m
     pdf.set_font('Arial', 'B', 9)
     pdf.set_fill_color(230, 230, 230)
     for i, col in enumerate(columnas):
-        pdf.cell(anchos[i], 8, str(col), 1, 0, 'C', 1)
+        pdf.cell(anchos[i], 8, limpiar_texto_pdf(col), 1, 0, 'C', 1)
     pdf.ln()
 
     pdf.set_font('Arial', '', 8)
     for index, row in df_datos.iterrows():
         for i, col in enumerate(columnas):
-            texto = str(row[col])
-            texto = texto.replace("Ñ","N").replace("ñ","n").replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
-            texto = texto.replace("Á","A").replace("É","E").replace("Í","I").replace("Ó","O").replace("Ú","U")
-            
+            texto = limpiar_texto_pdf(row[col])
             max_chars = int(anchos[i] * 0.70) 
             texto_limpio = texto[:max_chars]
-            
             pdf.cell(anchos[i], 7, texto_limpio, 1, 0, 'L')
         pdf.ln()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        tmp.seek(0)
+        data = tmp.read()
+    os.remove(tmp.name)
+    return data
+
+# --- MOTOR GENERADOR DE PDF PARA NOVEDADES (DISEÑO LOGÍSTICO AVANZADO) ---
+def crear_pdf_novedades(df_datos, texto_filtros):
+    class PDFNovedades(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 15)
+            self.set_fill_color(26, 59, 92)
+            self.set_text_color(255, 255, 255)
+            self.cell(0, 12, ' DROTACA - BITACORA DE NOVEDADES EN RUTA', 0, 1, 'C', 1)
+            self.ln(4)
+
+    pdf = PDFNovedades('L', 'mm', 'A4') 
+    pdf.add_page()
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"Filtros Aplicados: {limpiar_texto_pdf(texto_filtros)}", 0, 1)
+    pdf.cell(0, 6, f"Total Registros: {len(df_datos)}", 0, 1)
+    pdf.ln(4)
+
+    columnas_principales = ['FECHA', 'HORA', 'RUTA', 'ZONA', 'PLACA', 'UNIDAD', 'CHOFER', 'AYUDANTE', 'TIPO DE NOVEDAD']
+    anchos = [18, 12, 45, 18, 18, 20, 35, 35, 76] 
+    
+    pdf.set_font('Arial', 'B', 8)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.set_text_color(0, 0, 0)
+    for i, col in enumerate(columnas_principales):
+        pdf.cell(anchos[i], 8, limpiar_texto_pdf(col), 1, 0, 'C', 1)
+    pdf.ln()
+
+    for index, row in df_datos.iterrows():
+        pdf.set_font('Arial', 'B', 7)
+        pdf.set_text_color(0, 0, 0)
+        for i, col in enumerate(columnas_principales):
+            texto = limpiar_texto_pdf(row[col])
+            max_chars = int(anchos[i] * 0.60) 
+            texto_limpio = texto[:max_chars]
+            alineacion = 'C' if col in ['FECHA', 'HORA', 'PLACA', 'ZONA'] else 'L'
+            pdf.cell(anchos[i], 6, texto_limpio, 1, 0, alineacion)
+        pdf.ln()
+        
+        desc_texto = limpiar_texto_pdf(row.get('DESCRIPCIÓN', 'Sin descripción detallada.'))
+        pdf.set_font('Arial', 'I', 8)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(277, 5, f"Observacion Detallada: {desc_texto}", border=1, align='L', fill=False)
+        pdf.ln(2) 
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
@@ -297,7 +358,8 @@ def pantalla_login():
     
     usuarios_permitidos = {
         "David_Admin": "Drotaca2026",
-        "Supervisor_Oriente": "Oriente26",
+        "Supervisor_Oriente": "Oriente27",
+        "Supervisor_Centro": "25centro",
         "Supervisor_Occidente": "Occidente26",
         "Jsuarez": "295377886"
     }
@@ -308,8 +370,6 @@ def pantalla_login():
         if os.path.exists(nombre_imagen):
             st.image(nombre_imagen, width=300)
             st.markdown("<br>", unsafe_allow_html=True)
-        else:
-            st.warning(f"⚠️ No se encontró el archivo '{nombre_imagen}' en la carpeta.")
 
         st.markdown("<div class='login-title'>🚛 Monitoreo De Flota <span>2026</span></div>", unsafe_allow_html=True)
         st.markdown("<div class='login-subtitle'>Acceso Restringido al Sistema</div><br>", unsafe_allow_html=True)
@@ -321,11 +381,34 @@ def pantalla_login():
             
             if boton_ingresar:
                 if usuario_input in usuarios_permitidos and usuarios_permitidos[usuario_input] == password_input:
-                    st.session_state.autenticado = True
-                    st.session_state.usuario_actual = usuario_input
-                    st.rerun() 
+                    with st.spinner("⏳ Verificando credenciales y registrando acceso..."):
+                        st.session_state.autenticado = True
+                        st.session_state.usuario_actual = usuario_input
+                        
+                        try:
+                            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+                            try:
+                                credenciales_dict = dict(st.secrets["gcp_service_account"])
+                                creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+                            except:
+                                creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+                            cliente = gspread.authorize(creds)
+                            libro = cliente.open("Sistema_Flota_2026")
+                            
+                            try:
+                                ws_log = libro.worksheet("Registro_Accesos")
+                                ahora = obtener_hora_venezuela()
+                                fecha_str = ahora.strftime("%d/%m/%Y")
+                                hora_str = ahora.strftime("%I:%M %p")
+                                ws_log.append_row([fecha_str, hora_str, usuario_input])
+                            except Exception:
+                                pass 
+                        except Exception:
+                            pass 
+
+                        st.rerun() 
                 else:
-                    st.error("Usuario o contraseña incorrectos.")
+                    st.error("❌ Usuario o contraseña incorrectos.")
 
 # --- 6. MÓDULO 1: CONTROL DE FLOTA ---
 def modulo_flota():
@@ -390,10 +473,22 @@ def modulo_flota():
                 eje_x = "Placa"
                 
             km_data = km_data.sort_values(by="Km Mensual Actual", ascending=False)
-            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"{x:,.0f} Kms".replace(",", "X").replace(".", ",").replace("X", "."))
+            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"<b>{x:,.0f} Kms</b>".replace(",", "X").replace(".", ",").replace("X", "."))
             fig = px.bar(km_data, x=eje_x, y="Km Mensual Actual", text="Etiqueta")
-            fig.update_traces(textposition='outside', marker_color='#1A3B5C', cliponaxis=False)
-            fig.update_layout(xaxis_title="", yaxis_title="Kilómetros Recorridos", dragmode=False, margin=dict(t=30, b=0, l=0, r=0), height=400)
+            fig.update_traces(
+                textposition='outside', 
+                marker_color='#1A3B5C', 
+                cliponaxis=False,
+                textfont=dict(size=16, color='black')
+            )
+            fig.update_layout(
+                xaxis_title="", 
+                yaxis_title="Kilómetros Recorridos", 
+                dragmode=False, 
+                margin=dict(t=40, b=0, l=0, r=0),
+                height=400
+            )
+            fig.update_xaxes(tickfont=dict(size=15, color='black', family='Arial Black')) 
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
             st.divider()
             
@@ -710,16 +805,28 @@ def modulo_torre_control():
         st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA")
     with col_boton:
         st.markdown("<br>", unsafe_allow_html=True)
-        # Este botón destruye cualquier caché y fuerza lectura en vivo
         if st.button("🔄 Actualizar Pizarras", use_container_width=True):
             st.rerun() 
     st.markdown("---")
 
-    config_pizarras = {
+    # --- CONFIGURACIÓN MAESTRA DE PIZARRAS ---
+    config_pizarras_todas = {
         "Occidente": {"titulo": "RUTA OCCIDENTE", "responsable": "Jesus Brito"},
         "Centro": {"titulo": "RUTA CENTRO", "responsable": "Jerald Poche"},
         "Oriente": {"titulo": "RUTA ORIENTE", "responsable": "Gabriel Vera"}
     }
+
+    # --- MEJORA: CONTROL DE ACCESO BASADO EN ROLES (RBAC) ---
+    usuario = st.session_state.usuario_actual
+    if usuario == "Supervisor_Oriente":
+        config_pizarras = {"Oriente": config_pizarras_todas["Oriente"]}
+    elif usuario == "Supervisor_Centro":
+        config_pizarras = {"Centro": config_pizarras_todas["Centro"]}
+    elif usuario == "Supervisor_Occidente":
+        config_pizarras = {"Occidente": config_pizarras_todas["Occidente"]}
+    else:
+        # David_Admin y Jsuarez tienen pase VIP a todas las pizarras
+        config_pizarras = config_pizarras_todas
 
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -729,14 +836,32 @@ def modulo_torre_control():
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
         
     try:
-        # Se conecta SIN usar @st.cache_data, por eso tarda 3 segundos pero te da info al segundo.
         cliente = gspread.authorize(creds)
         libro = cliente.open("Sistema_Flota_2026")
     except Exception as e:
         st.error("Error conectando a la base de datos de la Torre de Control.")
         return
 
-    # FASE 1: RECOPILACIÓN DE DATOS GLOBALES
+    # FASE 1.5: RECOPILAR NOVEDADES EXCLUSIVAS DEL DÍA
+    novedades_del_dia = {"Occidente": 0, "Centro": 0, "Oriente": 0}
+    fecha_hoy_str = obtener_hora_venezuela().strftime("%d/%m/%Y")
+    
+    try:
+        ws_novedades = libro.worksheet("Novedades_Ruta")
+        datos_novedades = ws_novedades.get_all_records()
+        if datos_novedades:
+            df_n = pd.DataFrame(datos_novedades)
+            if 'FECHA' in df_n.columns and 'ZONA' in df_n.columns:
+                df_hoy = df_n[df_n['FECHA'].astype(str).str.strip() == fecha_hoy_str]
+                for z in df_hoy['ZONA'].dropna():
+                    z_str = str(z).strip().upper()
+                    if "OCCIDENTE" in z_str: novedades_del_dia["Occidente"] += 1
+                    elif "CENTRO" in z_str: novedades_del_dia["Centro"] += 1
+                    elif "ORIENTE" in z_str: novedades_del_dia["Oriente"] += 1
+    except Exception:
+        pass
+
+    # FASE 1: RECOPILACIÓN DE DATOS
     datos_por_zona = {}
     global_cubiertos = 0
     global_bultos = 0
@@ -763,17 +888,21 @@ def modulo_torre_control():
         except:
             pass
 
-    # FASE 2: RENDERIZADO DEL RESUMEN GLOBAL (TOP)
-    st.markdown("### 🌎 Resumen Global de Operaciones")
-    fecha_hoy = obtener_hora_venezuela().strftime("%d/%m/%Y")
-    
+    # FASE 2: RENDERIZADO DEL RESUMEN GLOBAL (DINÁMICO POR ROL)
+    if usuario in ["David_Admin", "Jsuarez"]:
+        st.markdown("### 🌎 Resumen Global de Operaciones (Toda la Flota)")
+    else:
+        # Extrae el nombre de la zona (ej. "Oriente")
+        zona_texto = list(config_pizarras.keys())[0]
+        st.markdown(f"### 🌎 Resumen Operativo: RUTA {zona_texto.upper()}")
+        
     col_g1, col_g2, col_g3 = st.columns(3)
-    col_g1.metric("📅 Despacho del Día", fecha_hoy)
+    col_g1.metric("📅 Despacho del Día", fecha_hoy_str)
     col_g2.metric("✅ Total Clientes Cubiertos", f"{int(global_cubiertos)} Clientes")
     col_g3.metric("📦 Total Bultos Entregados", f"{int(global_bultos)} Bultos")
     st.markdown("---")
 
-    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES (HTML INYECTADO)
+    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES
     for zona, data in datos_por_zona.items():
         st.markdown(f"### 📍 PIZARRA {data['titulo']}")
         col_res, col_hora, _ = st.columns([2, 2, 4])
@@ -808,12 +937,10 @@ def modulo_torre_control():
 
         df_zona = pd.concat([df_zona, pd.DataFrame([fila_totales])], ignore_index=True)
 
-        # LÓGICA DE COLORES INTERNOS (SEMÁFORO) Y BORDES NEGROS
         def estilo_pizarra_html(row):
             styles = [''] * len(row)
             if row[primer_columna] == 'TOTALES':
                 for i, col in enumerate(row.index):
-                    # Aquí la fila de totales recibe la fuente grande a 20px y negrita
                     base_style_total = 'font-weight: bold; text-align: center; border: 1px solid black; font-size: 20px; '
                     if col == c_bultos:
                         styles[i] = base_style_total + 'background-color: #FACC15; color: black;'
@@ -822,8 +949,6 @@ def modulo_torre_control():
             else:
                 for i, col in enumerate(row.index):
                     base_style = 'text-align: center; border: 1px solid black; '
-                    
-                    # --- EL CAMBIO MAGICO: HACER LOS NÚMEROS A 20PX Y NEGRITA ---
                     if col in [c_cubrir, c_cubiertos, c_pendientes, c_bultos] and col:
                         base_style += 'font-size: 20px; font-weight: bold; '
                     
@@ -839,7 +964,6 @@ def modulo_torre_control():
                         styles[i] = base_style
             return styles
 
-        # ESTA PARTE FORZA LOS TÍTULOS AZULES Y LOS BORDES NEGROS EN TODAS LAS CELDAS
         estilos_html_css = [
             dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black")]),
             dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "10px"), ("border", "1px solid black"), ("font-size", "13px")]),
@@ -849,7 +973,6 @@ def modulo_torre_control():
         col_tabla, col_grafico = st.columns([0.8, 0.2])
         
         with col_tabla:
-            # Aquí es donde ocurre la magia para saltarse la restricción de Streamlit y pintarlo perfecto
             tabla_html = df_zona.style.apply(estilo_pizarra_html, axis=1).set_table_styles(estilos_html_css).hide(axis="index").to_html()
             st.markdown(tabla_html, unsafe_allow_html=True)
             
@@ -864,14 +987,145 @@ def modulo_torre_control():
                 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
                 st.info("Sin datos de clientes para calcular efectividad.")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            cantidad_nov = novedades_del_dia.get(zona, 0)
+            if cantidad_nov == 0:
+                st.markdown(f"<div style='text-align: center; background-color: #E8F5E9; color: #198754; padding: 10px; border-radius: 5px; border: 2px solid #198754; font-weight: bold; font-size: 14px;'>🚨 Novedades en Ruta:<br>Sin Novedad</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='text-align: center; background-color: #FFEFEF; color: #DC3545; padding: 10px; border-radius: 5px; border: 2px solid #DC3545; font-weight: bold; font-size: 15px;'>🚨 Novedades en Ruta:<br>{cantidad_nov:02d}</div>", unsafe_allow_html=True)
                 
         st.markdown("<br><br>", unsafe_allow_html=True)
+
+# --- 7.9. MÓDULO 4: NOVEDADES EN RUTA ---
+def modulo_novedades():
+    col_titulo, col_boton = st.columns([0.8, 0.2])
+    with col_titulo:
+        st.title("🚨 Historial de Novedades en Ruta")
+    with col_boton:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Actualizar Bitácora", use_container_width=True):
+            st.rerun()
+    st.markdown("---")
+
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    try:
+        credenciales_dict = dict(st.secrets["gcp_service_account"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+    except:
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+        
+    try:
+        cliente = gspread.authorize(creds)
+        libro = cliente.open("Sistema_Flota_2026")
+        ws_novedades = libro.worksheet("Novedades_Ruta")
+        datos = ws_novedades.get_all_records()
+    except Exception as e:
+        st.warning("⚠️ No se encontró la hoja 'Novedades_Ruta' o está vacía. Asegúrate de crearla con las 10 columnas exactas.")
+        return
+
+    if not datos:
+        st.info("No hay novedades registradas en el sistema todavía.")
+        return
+
+    df_nov = pd.DataFrame(datos)
+    
+    cols_esperadas = ['FECHA', 'HORA', 'RUTA', 'ZONA', 'PLACA', 'UNIDAD', 'CHOFER', 'AYUDANTE', 'TIPO DE NOVEDAD', 'DESCRIPCIÓN']
+    for c in cols_esperadas:
+        if c not in df_nov.columns:
+            df_nov[c] = ""
+            
+    df_nov = df_nov[cols_esperadas]
+
+    df_nov['FECHA_DT'] = pd.to_datetime(df_nov['FECHA'], format='%d/%m/%Y', errors='coerce')
+    df_nov['MES_NUM'] = df_nov['FECHA_DT'].dt.month
+    df_nov['MES_NOMBRE'] = df_nov['MES_NUM'].map(MESES_ESPANOL)
+    
+    meses_validos = [str(m) for m in df_nov['MES_NOMBRE'].dropna().unique()]
+    meses_disp = ["Todos los meses"] + sorted(meses_validos, key=lambda m: list(MESES_ESPANOL.values()).index(m) if m in MESES_ESPANOL.values() else 0)
+
+    st.markdown("#### 🔍 Filtros de Búsqueda Avanzados")
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    
+    rutas_disp = ["Todas"] + sorted([str(x) for x in df_nov['RUTA'].unique() if str(x).strip() != ""])
+    choferes_disp = ["Todos"] + sorted([str(x) for x in df_nov['CHOFER'].unique() if str(x).strip() != ""])
+    ayudantes_disp = ["Todos"] + sorted([str(x) for x in df_nov['AYUDANTE'].unique() if str(x).strip() != ""])
+    
+    with col_f1: f_mes = st.selectbox("📅 Filtrar por Mes:", meses_disp)
+    with col_f2: f_ruta = st.selectbox("📍 Filtrar por Ruta:", rutas_disp)
+    with col_f3: f_chofer = st.selectbox("👤 Filtrar por Chofer:", choferes_disp)
+    with col_f4: f_ayudante = st.selectbox("👷 Filtrar por Ayudante:", ayudantes_disp)
+    
+    f_busqueda = st.text_input("🔎 Búsqueda libre (Placa, Zona, Unidad o Palabra clave):")
+
+    df_filtrado = df_nov.copy()
+    filtros_usados = []
+    
+    if f_mes != "Todos los meses":
+        df_filtrado = df_filtrado[df_filtrado['MES_NOMBRE'] == f_mes]
+        filtros_usados.append(f"Mes: {f_mes}")
+    if f_ruta != "Todas":
+        df_filtrado = df_filtrado[df_filtrado['RUTA'] == f_ruta]
+        filtros_usados.append(f"Ruta: {f_ruta}")
+    if f_chofer != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['CHOFER'] == f_chofer]
+        filtros_usados.append(f"Chofer: {f_chofer}")
+    if f_ayudante != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['AYUDANTE'] == f_ayudante]
+        filtros_usados.append(f"Ayudante: {f_ayudante}")
+    if f_busqueda:
+        mask = df_filtrado.astype(str).apply(lambda x: x.str.contains(f_busqueda, case=False)).any(axis=1)
+        df_filtrado = df_filtrado[mask]
+        filtros_usados.append(f"Búsqueda: '{f_busqueda}'")
+        
+    texto_filtros = " | ".join(filtros_usados) if filtros_usados else "Ninguno (Mostrando todo)"
+
+    df_filtrado = df_filtrado.drop(columns=['FECHA_DT', 'MES_NUM', 'MES_NOMBRE'])
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    
+    c1.metric("Total de Novedades (Filtradas)", len(df_filtrado))
+    
+    with c3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if not df_filtrado.empty:
+            pdf_novedades = crear_pdf_novedades(df_filtrado, texto_filtros)
+            st.download_button(
+                label="📄 Descargar Bitácora en PDF",
+                data=pdf_novedades,
+                file_name=f"Bitacora_Novedades_{obtener_hora_venezuela().strftime('%d%m%Y')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                type="primary"
+            )
+
+    st.markdown("---")
+    st.markdown("### 📋 Historial Inmutable")
+
+    if not df_filtrado.empty:
+        def estilo_novedades(row):
+            styles = ['border: 1px solid black; text-align: center; font-size: 14px;'] * len(row)
+            for i, col in enumerate(row.index):
+                if col == 'DESCRIPCIÓN':
+                    styles[i] = 'border: 1px solid black; text-align: left; font-size: 14px; padding: 10px; font-style: italic; background-color: #F8F9FA;' 
+            return styles
+
+        estilos_html = [
+            dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black")]),
+            dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "12px"), ("border", "1px solid black"), ("font-size", "14px")]),
+            dict(selector="tbody td", props=[("border", "1px solid black"), ("padding", "8px")])
+        ]
+        
+        tabla_html = df_filtrado.style.apply(estilo_novedades, axis=1).set_table_styles(estilos_html).hide(axis="index").to_html()
+        st.markdown(tabla_html, unsafe_allow_html=True)
+    else:
+        st.info("No hay resultados para los filtros seleccionados.")
 
 # --- 8. CONTROL DE FLUJO Y NAVEGACIÓN ---
 if not st.session_state.autenticado:
     pantalla_login()
 else:
-    # Retomamos el color claro corporativo que tenías en las imágenes ("#F0F4F8")
     st.markdown("""
     <style>
     [data-testid="stApp"] { background: #F0F4F8 !important; color: #31333F !important; }
@@ -883,31 +1137,32 @@ else:
         st.markdown(f"### 👤 Usuario:\n**{st.session_state.usuario_actual}**")
         st.divider()
         st.markdown("### 🗂️ Módulos del Sistema")
-        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control"])
+        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control", "🚨 Novedades en Ruta"])
         
-        st.divider()
-        st.markdown("### 🤖 Control de Bots (Pizarras)")
-        try:
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        if st.session_state.usuario_actual == "David_Admin":
+            st.divider()
+            st.markdown("### 🤖 Control de Bots (Pizarras)")
             try:
-                credenciales_dict = dict(st.secrets["gcp_service_account"])
-                creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
-            except:
-                creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
-            cliente = gspread.authorize(creds)
-            libro_config = cliente.open("Sistema_Flota_2026")
-            ws_config = libro_config.worksheet("Configuracion")
-            estado_actual = str(ws_config.acell('A1').value).strip().upper()
-            
-            bot_activado = st.toggle("Encender Sincronización Automática", value=(estado_actual == "ENCENDIDO"))
-            nuevo_estado = "ENCENDIDO" if bot_activado else "APAGADO"
-            
-            if nuevo_estado != estado_actual:
-                ws_config.update_acell('A1', nuevo_estado)
-                st.toast(f"Estado de los Bots cambiado a: {nuevo_estado}")
-                st.success(f"Bots en {nuevo_estado}")
-        except Exception as e:
-            st.caption("⚠️ No se pudo cargar el estado de los bots. Verifica la hoja 'Configuracion'.")
+                scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+                try:
+                    credenciales_dict = dict(st.secrets["gcp_service_account"])
+                    creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+                except:
+                    creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+                cliente = gspread.authorize(creds)
+                libro_config = cliente.open("Sistema_Flota_2026")
+                ws_config = libro_config.worksheet("Configuracion")
+                estado_actual = str(ws_config.acell('A1').value).strip().upper()
+                
+                bot_activado = st.toggle("Encender Sincronización Automática", value=(estado_actual == "ENCENDIDO"))
+                nuevo_estado = "ENCENDIDO" if bot_activado else "APAGADO"
+                
+                if nuevo_estado != estado_actual:
+                    ws_config.update_acell('A1', nuevo_estado)
+                    st.toast(f"Estado de los Bots cambiado a: {nuevo_estado}")
+                    st.success(f"Bots en {nuevo_estado}")
+            except Exception as e:
+                st.caption("⚠️ No se pudo cargar el estado de los bots. Verifica la hoja 'Configuracion'.")
 
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True, type="primary"):
@@ -922,3 +1177,5 @@ else:
         modulo_personal()
     elif menu_seleccionado == "🗼 Torre de Control":
         modulo_torre_control()
+    elif menu_seleccionado == "🚨 Novedades en Ruta":
+        modulo_novedades()
