@@ -348,9 +348,9 @@ def modulo_flota():
         mes_actual_texto = f"{meses_año[ahora.month - 1]} {ahora.year}"
         
         st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; background-color: #ffffff; padding: 15px; border-radius: 8px; border-left: 5px solid #1A3B5C; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #003366; margin-bottom: 20px;">
             <div style="font-size: 15px; margin-bottom: 5px;">
-                🕒 <b>Hora del Sistema:</b> <span style="color: #1A3B5C;">{fecha_reloj}</span>
+                🕒 <b>Hora del Sistema:</b> <span style="color: #003366;">{fecha_reloj}</span>
             </div>
             <div style="font-size: 15px;">
                 📡 <b>Última edición real del documento:</b> <span style="color: #198754; font-weight: bold;">{ultima_sync}</span> <span style="font-size: 13px; color: gray;">(Por el equipo)</span>
@@ -390,31 +390,10 @@ def modulo_flota():
                 eje_x = "Placa"
                 
             km_data = km_data.sort_values(by="Km Mensual Actual", ascending=False)
-            
-            # --- MEJORA VISUAL DEL GRÁFICO ---
-            # Etiquetas en Negrita (<b>)
-            km_data['Eje_X_Display'] = km_data[eje_x].apply(lambda x: f"<b>{x}</b>")
-            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"<b>{x:,.0f} Kms</b>".replace(",", "X").replace(".", ",").replace("X", "."))
-            
-            fig = px.bar(km_data, x="Eje_X_Display", y="Km Mensual Actual", text="Etiqueta")
-            
-            # Tamaño de fuente más grande (14) y color oscuro
-            fig.update_traces(textposition='outside', marker_color='#1A3B5C', cliponaxis=False, textfont=dict(size=14, color='#17375E'))
-            
-            # Fondo transparente para que se adapte al nuevo color de la página
-            fig.update_layout(
-                xaxis_title="", 
-                yaxis_title="<b>Kilómetros Recorridos</b>", 
-                dragmode=False, 
-                margin=dict(t=30, b=0, l=0, r=0), 
-                height=400,
-                xaxis=dict(tickfont=dict(size=13, color='#17375E')),
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)'
-            )
-            # Líneas guía más sutiles
-            fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#E2E8F0')
-            
+            km_data['Etiqueta'] = km_data['Km Mensual Actual'].apply(lambda x: f"{x:,.0f} Kms".replace(",", "X").replace(".", ",").replace("X", "."))
+            fig = px.bar(km_data, x=eje_x, y="Km Mensual Actual", text="Etiqueta")
+            fig.update_traces(textposition='outside', marker_color='#1A3B5C', cliponaxis=False)
+            fig.update_layout(xaxis_title="", yaxis_title="Kilómetros Recorridos", dragmode=False, margin=dict(t=30, b=0, l=0, r=0), height=400)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
             st.divider()
             
@@ -508,7 +487,7 @@ def modulo_flota():
             def aplicar_estilos_dinamicos(row):
                 styles = [''] * len(row)
                 if row['Placa'] == 'TOTALES':
-                    return ['background-color: #FACC15; color: black; font-weight: bold; text-align: center;'] * len(row)
+                    return ['background-color: #ffff00; color: black; font-weight: bold; text-align: center;'] * len(row)
                 for i, col in enumerate(row.index):
                     if col == 'Estatus GPS': styles[i] = color_gps(row[col]) + ' text-align: center;'
                     elif col == 'Estatus_Unidad': styles[i] = color_estatus(row[col]) + ' text-align: center;'
@@ -638,7 +617,7 @@ def modulo_personal():
                             zonas_count.columns = ['ZONA', 'Días']
                             fig = px.pie(zonas_count, values='Días', names='ZONA', hole=0.4, color_discrete_sequence=px.colors.sequential.Blues_r)
                             fig.update_traces(textposition='inside', textinfo='percent+label')
-                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300, paper_bgcolor='rgba(0,0,0,0)')
+                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300)
                             st.plotly_chart(fig, use_container_width=True)
                         else:
                             st.info("Sin registros de zona para esta selección.")
@@ -706,7 +685,7 @@ def modulo_personal():
                             zonas_count.columns = ['ZONA', 'Días']
                             fig = px.pie(zonas_count, values='Días', names='ZONA', hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
                             fig.update_traces(textposition='inside', textinfo='percent+label')
-                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300, paper_bgcolor='rgba(0,0,0,0)')
+                            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=300)
                             st.plotly_chart(fig, use_container_width=True)
                         else:
                             st.info("Sin registros de zona para esta selección.")
@@ -728,9 +707,10 @@ def modulo_personal():
 def modulo_torre_control():
     col_titulo, col_boton = st.columns([0.8, 0.2])
     with col_titulo:
-        st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA (EN TIEMPO REAL)")
+        st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA")
     with col_boton:
         st.markdown("<br>", unsafe_allow_html=True)
+        # Este botón destruye cualquier caché y fuerza lectura en vivo
         if st.button("🔄 Actualizar Pizarras", use_container_width=True):
             st.rerun() 
     st.markdown("---")
@@ -749,6 +729,7 @@ def modulo_torre_control():
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
         
     try:
+        # Se conecta SIN usar @st.cache_data, por eso tarda 3 segundos pero te da info al segundo.
         cliente = gspread.authorize(creds)
         libro = cliente.open("Sistema_Flota_2026")
     except Exception as e:
@@ -792,17 +773,17 @@ def modulo_torre_control():
     col_g3.metric("📦 Total Bultos Entregados", f"{int(global_bultos)} Bultos")
     st.markdown("---")
 
-    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES
+    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES (HTML INYECTADO)
     for zona, data in datos_por_zona.items():
-        st.subheader(f"📍 PIZARRA {data['titulo']}")
-        
-        col1, col2 = st.columns([1, 1])
-        with col1: st.info(f"👤 **Responsable:** {data['responsable']}")
-        with col2:
+        st.markdown(f"### 📍 PIZARRA {data['titulo']}")
+        col_res, col_hora, _ = st.columns([2, 2, 4])
+        with col_res:
+            st.markdown(f"👤 **Responsable:** `{data['responsable']}`")
+        with col_hora:
             if data['hora'] and str(data['hora']).strip() != "" and str(data['hora']).strip() != "nan":
-                st.success(f"⏱️ **Última actualización:** {data['hora']}")
+                st.markdown(f"⏱️ **Actualizado:** `{data['hora']}`")
             else:
-                st.warning("⚠️ **Última actualización:** Pendiente por sincronizar")
+                st.markdown(f"⚠️ **Actualizado:** `Pendiente`")
 
         df_zona = data["df"].copy()
         
@@ -816,9 +797,8 @@ def modulo_torre_control():
         sum_cubiertos = pd.to_numeric(df_zona[c_cubiertos], errors='coerce').fillna(0).sum() if c_cubiertos else 0
         sum_pendientes = pd.to_numeric(df_zona[c_pendientes], errors='coerce').fillna(0).sum() if c_pendientes else 0
         sum_bultos = pd.to_numeric(df_zona[c_bultos], errors='coerce').fillna(0).sum() if c_bultos else 0
-        
-        efectividad = (sum_cubiertos / sum_cubrir * 100) if sum_cubrir > 0 else 0
 
+        # Fila TOTALES
         fila_totales = {col: "" for col in df_zona.columns}
         fila_totales[primer_columna] = "TOTALES"
         if c_cubrir: fila_totales[c_cubrir] = int(sum_cubrir)
@@ -828,38 +808,59 @@ def modulo_torre_control():
 
         df_zona = pd.concat([df_zona, pd.DataFrame([fila_totales])], ignore_index=True)
 
-        def estilo_fila_totales(row):
+        # LÓGICA DE COLORES INTERNOS (SEMÁFORO) Y BORDES NEGROS
+        def estilo_pizarra_html(row):
             styles = [''] * len(row)
             if row[primer_columna] == 'TOTALES':
                 for i, col in enumerate(row.index):
+                    # Aquí la fila de totales recibe la fuente grande a 20px y negrita
+                    base_style_total = 'font-weight: bold; text-align: center; border: 1px solid black; font-size: 20px; '
                     if col == c_bultos:
-                        styles[i] = 'background-color: #FFFF00; color: black; font-weight: bold; text-align: center; border: 1px solid black;'
+                        styles[i] = base_style_total + 'background-color: #FACC15; color: black;'
                     else:
-                        styles[i] = 'background-color: #D9E1F2; color: #17375E; font-weight: bold; text-align: center;'
+                        styles[i] = base_style_total + 'background-color: #1A3B5C; color: white;'
             else:
                 for i, col in enumerate(row.index):
-                    styles[i] = 'text-align: center;'
+                    base_style = 'text-align: center; border: 1px solid black; '
+                    
+                    # --- EL CAMBIO MAGICO: HACER LOS NÚMEROS A 20PX Y NEGRITA ---
+                    if col in [c_cubrir, c_cubiertos, c_pendientes, c_bultos] and col:
+                        base_style += 'font-size: 20px; font-weight: bold; '
+                    
+                    if col == c_pendientes:
+                        valor = pd.to_numeric(row[col], errors='coerce')
+                        if valor > 0:
+                            styles[i] = base_style + 'background-color: #FFEFEF; color: #DC3545;'
+                        elif valor == 0:
+                            styles[i] = base_style + 'color: #198754;'
+                        else:
+                            styles[i] = base_style
+                    else:
+                        styles[i] = base_style
             return styles
 
-        estilos_torre = [dict(selector="th", props=[("background-color", "#17375E"), ("color", "white"), ("text-align", "center")])]
+        # ESTA PARTE FORZA LOS TÍTULOS AZULES Y LOS BORDES NEGROS EN TODAS LAS CELDAS
+        estilos_html_css = [
+            dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black")]),
+            dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "10px"), ("border", "1px solid black"), ("font-size", "13px")]),
+            dict(selector="tbody td", props=[("border", "1px solid black"), ("padding", "8px"), ("font-size", "13px")])
+        ]
         
         col_tabla, col_grafico = st.columns([0.8, 0.2])
         
         with col_tabla:
-            st.dataframe(
-                df_zona.style.apply(estilo_fila_totales, axis=1).set_table_styles(estilos_torre),
-                use_container_width=True,
-                hide_index=True
-            )
+            # Aquí es donde ocurre la magia para saltarse la restricción de Streamlit y pintarlo perfecto
+            tabla_html = df_zona.style.apply(estilo_pizarra_html, axis=1).set_table_styles(estilos_html_css).hide(axis="index").to_html()
+            st.markdown(tabla_html, unsafe_allow_html=True)
             
         with col_grafico:
-            st.markdown(f"<div style='text-align: center; font-weight: bold; color: #17375E; font-size: 16px;'>EFECTIVIDAD</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center; font-weight: bold; color: #1A3B5C; font-size: 16px;'>EFECTIVIDAD</div>", unsafe_allow_html=True)
             if sum_cubrir > 0:
                 df_pie = pd.DataFrame({'Estado': ['Entregado', 'Pendiente'], 'Cantidad': [sum_cubiertos, sum_pendientes]})
                 fig = px.pie(df_pie, values='Cantidad', names='Estado', hole=0.4, 
                              color='Estado', color_discrete_map={'Entregado':'#4F81BD', 'Pendiente':'#C0504D'})
                 fig.update_traces(textposition='inside', textinfo='percent')
-                fig.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=200, paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=200)
                 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
                 st.info("Sin datos de clientes para calcular efectividad.")
@@ -870,11 +871,10 @@ def modulo_torre_control():
 if not st.session_state.autenticado:
     pantalla_login()
 else:
-    # --- CAMBIO DE COLOR DE FONDO ---
-    # "#F0F4F8" es el nuevo fondo (Alice Blue Corporativo). Color de texto principal #17375E.
+    # Retomamos el color claro corporativo que tenías en las imágenes ("#F0F4F8")
     st.markdown("""
     <style>
-    [data-testid="stApp"] { background: #F0F4F8 !important; color: #17375E !important; }
+    [data-testid="stApp"] { background: #F0F4F8 !important; color: #31333F !important; }
     [data-testid="stHeader"] { background-color: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
