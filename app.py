@@ -9,6 +9,8 @@ import io
 import openpyxl
 from fpdf import FPDF
 import tempfile
+import time # Para el sistema antichoques
+import streamlit.components.v1 as components # Para el cronómetro VIP
 
 # --- 1. CONFIGURACIÓN DE PÁGINA (Debe ser la primera línea) ---
 st.set_page_config(page_title="Control de Flota Drotaca", page_icon="🚛", layout="wide")
@@ -799,8 +801,10 @@ def modulo_personal():
         st.error(f"Error cargando los datos de Personal: {e}")
 
 # --- 7.5. MÓDULO 3: TORRE DE CONTROL (DASHBOARD GERENCIAL) ---
+@st.fragment(run_every="5m")
 def modulo_torre_control():
-    col_titulo, col_boton = st.columns([0.8, 0.2])
+    # --- MEJORA: EVITAR EL "DEAD ZONE" DEL BOTÓN DEPLOY EN LA ESQUINA DERECHA ---
+    col_titulo, col_boton, col_vacia = st.columns([0.65, 0.25, 0.1])
     with col_titulo:
         st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA")
     with col_boton:
@@ -835,12 +839,19 @@ def modulo_torre_control():
     except:
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
         
-    try:
-        cliente = gspread.authorize(creds)
-        libro = cliente.open("Sistema_Flota_2026")
-    except Exception as e:
-        st.error("Error conectando a la base de datos de la Torre de Control.")
-        return
+    # --- SISTEMA ANTICHOQUES (REINTENTOS DE CONEXIÓN A LA API) ---
+    libro = None
+    for intento in range(3):
+        try:
+            cliente = gspread.authorize(creds)
+            libro = cliente.open("Sistema_Flota_2026")
+            break # Si se conecta, rompe el ciclo y continúa
+        except Exception as e:
+            if intento < 2:
+                time.sleep(3) # Espera 3 segundos si hay choque con el bot local
+            else:
+                st.warning("⚠️ Google Sheets está ocupado sincronizando las pizarras locales. Se recuperará automáticamente en el próximo ciclo.")
+                return
 
     # FASE 1.5: RECOPILAR NOVEDADES EXCLUSIVAS DEL DÍA
     novedades_del_dia = {"Occidente": 0, "Centro": 0, "Oriente": 0}
@@ -1130,6 +1141,8 @@ else:
     <style>
     [data-testid="stApp"] { background: #F0F4F8 !important; color: #31333F !important; }
     [data-testid="stHeader"] { background-color: transparent !important; }
+    /* MAGIA: Ocultar el botón "Deploy" que estorba en la esquina */
+    .stAppDeployButton {display:none;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -1139,6 +1152,7 @@ else:
         st.markdown("### 🗂️ Módulos del Sistema")
         menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control", "🚨 Novedades en Ruta"])
         
+        # --- MEJORA 1: ACCESO EXCLUSIVO AL INTERRUPTOR DE BOTS (SOLO DAVID_ADMIN) ---
         if st.session_state.usuario_actual == "David_Admin":
             st.divider()
             st.markdown("### 🤖 Control de Bots (Pizarras)")
@@ -1163,6 +1177,31 @@ else:
                     st.success(f"Bots en {nuevo_estado}")
             except Exception as e:
                 st.caption("⚠️ No se pudo cargar el estado de los bots. Verifica la hoja 'Configuracion'.")
+                
+        # --- MEJORA 2: CRONÓMETRO VISUAL EXCLUSIVO (Para Admin y Jsuarez) ---
+        if st.session_state.usuario_actual in ["David_Admin", "Jsuarez"]:
+            # Solo ponemos divisor si Jsuarez lo está viendo (para no poner dos divisores seguidos a David_Admin)
+            if st.session_state.usuario_actual == "Jsuarez":
+                st.divider()
+                
+            st.markdown("<br>", unsafe_allow_html=True)
+            components.html("""
+            <div style="font-family: sans-serif; text-align: center; background-color: #E8F5E9; padding: 12px; border-radius: 8px; border: 2px solid #198754; color: #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <span style="font-size: 13px; font-weight: bold; text-transform: uppercase;">⏱️ Próxima lectura a BD en:</span><br>
+                <span id="reloj" style="font-size: 28px; font-weight: 900; letter-spacing: 2px;">05:00</span>
+            </div>
+            <script>
+                let tiempo = 300; // 300 segundos = 5 minutos exactos
+                const elemento = document.getElementById('reloj');
+                setInterval(() => {
+                    tiempo--;
+                    if (tiempo <= 0) tiempo = 300; // Reinicia el ciclo visual
+                    let m = Math.floor(tiempo / 60);
+                    let s = tiempo % 60;
+                    elemento.innerText = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+                }, 1000);
+            </script>
+            """, height=100)
 
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True, type="primary"):
