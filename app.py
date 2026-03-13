@@ -9,8 +9,11 @@ import io
 import openpyxl
 from fpdf import FPDF
 import tempfile
-import time # Para el sistema antichoques
-import streamlit.components.v1 as components # Para el cronómetro VIP
+import time 
+import streamlit.components.v1 as components 
+
+# --- IMPORTACIÓN DEL NUEVO MÓDULO MODULARIZADO ---
+from compras import renderizar_modulo_compras
 
 # --- 1. CONFIGURACIÓN DE PÁGINA (Debe ser la primera línea) ---
 st.set_page_config(page_title="Control de Flota Drotaca", page_icon="🚛", layout="wide")
@@ -20,6 +23,17 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
+if "nombre_real" not in st.session_state:
+    st.session_state.nombre_real = ""
+
+# =========================================================================================
+# --- VARIABLE GLOBAL DE ESTILOS HTML PARA TODAS LAS TABLAS ---
+# =========================================================================================
+estilos_html_genericos = [
+    dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black"), ("background-color", "white")]),
+    dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "12px"), ("border", "1px solid black"), ("font-size", "14px")]),
+    dict(selector="tbody td", props=[("border", "1px solid black")])
+]
 
 # --- 3. FUNCIONES GENERALES ---
 def obtener_hora_venezuela():
@@ -47,45 +61,36 @@ def limpiar_numero_logistica(valor):
     except:
         return 0.0
 
-def color_gps(val):
-    color = '#198754' if val == 'GPS Operativo' else '#DC3545'
-    return f'color: {color}; font-weight: bold;'
-
-def color_estatus(val):
-    val_str = str(val).strip().upper()
-    if val_str == 'OPERATIVO': return 'color: #198754; font-weight: bold;'
-    elif val_str == 'NO OPERATIVO': return 'color: #DC3545; font-weight: bold;'
-    return ''
-
-def color_taller(val):
-    val_str = str(val).strip().upper()
-    if val_str == 'TERMINADO': return 'color: #198754; font-weight: bold;'
-    if val_str == 'EN PROCESO': return 'color: #DC3545; font-weight: bold;'
-    if '⚠️' in val_str: return 'color: #DC3545; font-weight: bold;'
-    return ''
-
 # DICCIONARIO PARA MESES EN ESPAÑOL
 MESES_ESPANOL = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
     7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
-# --- 3.1 LIMPIEZA EXTREMA PARA PDF (EVITAR CRASHES POR UNICODE) ---
+# --- 3.1 LIMPIEZA EXTREMA PARA PDF (EVITAR SÍMBOLOS "?" POR EMOJIS) ---
 def limpiar_texto_pdf(texto):
     if pd.isna(texto): return ""
     texto = str(texto)
-    texto = texto.replace("Ñ","N").replace("ñ","n").replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
-    texto = texto.replace("Á","A").replace("É","E").replace("Í","I").replace("Ó","O").replace("Ú","U")
-    texto = texto.replace('\u2013', '-').replace('\u2014', '-') 
-    texto = texto.replace('\u2018', "'").replace('\u2019', "'") 
-    texto = texto.replace('\u201c', '"').replace('\u201d', '"') 
-    texto = texto.replace('\u2026', '...') 
-    return texto.encode('latin-1', 'replace').decode('latin-1')
+    reemplazos = {
+        "Ñ":"N", "ñ":"n", "á":"a", "é":"e", "í":"i", "ó":"o", "ú":"u",
+        "Á":"A", "É":"E", "Í":"I", "Ó":"O", "Ú":"U",
+        '\u2013':'-', '\u2014':'-', '\u2018':"'", '\u2019':"'", '\u201c':'"', '\u201d':'"', '\u2026':'...'
+    }
+    for k, v in reemplazos.items():
+        texto = texto.replace(k, v)
+        
+    return texto.encode('latin-1', 'ignore').decode('latin-1').strip()
 
-# --- MOTOR GENERADOR DE PDF PARA PERSONAL ---
+# --- MOTORES GENERADORES DE PDF ---
 def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, mes_filtro, extra_filtros=""):
     class PDF(FPDF):
         def header(self):
+            if os.path.exists("encabezado.png"):
+                self.image("encabezado.png", x=10, y=8, w=277)
+                self.set_y(46)
+            else:
+                self.set_y(15)
+                
             self.set_font('Arial', 'B', 14)
             self.set_fill_color(26, 59, 92)
             self.set_text_color(255, 255, 255)
@@ -138,10 +143,15 @@ def crear_pdf_operativo(nombre, rol, df_datos, dias_tot, dias_trab, dias_inac, m
     os.remove(tmp.name)
     return data
 
-# --- MOTOR GENERADOR DE PDF PARA NOVEDADES (DISEÑO LOGÍSTICO AVANZADO) ---
 def crear_pdf_novedades(df_datos, texto_filtros):
     class PDFNovedades(FPDF):
         def header(self):
+            if os.path.exists("encabezado.png"):
+                self.image("encabezado.png", x=10, y=8, w=277)
+                self.set_y(46)
+            else:
+                self.set_y(15)
+                
             self.set_font('Arial', 'B', 15)
             self.set_fill_color(26, 59, 92)
             self.set_text_color(255, 255, 255)
@@ -184,6 +194,69 @@ def crear_pdf_novedades(df_datos, texto_filtros):
         pdf.multi_cell(277, 5, f"Observacion Detallada: {desc_texto}", border=1, align='L', fill=False)
         pdf.ln(2) 
 
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        tmp.seek(0)
+        data = tmp.read()
+    os.remove(tmp.name)
+    return data
+
+def crear_pdf_taller(df_datos, texto_filtros):
+    class PDFTaller(FPDF):
+        def header(self):
+            if os.path.exists("encabezado.png"):
+                self.image("encabezado.png", x=10, y=8, w=277)
+                self.set_y(46)
+            else:
+                self.set_y(15)
+                
+            self.set_font('Arial', 'B', 15)
+            self.set_fill_color(26, 59, 92)
+            self.set_text_color(255, 255, 255)
+            self.cell(0, 12, ' DROTACA - HISTORIAL DE MANTENIMIENTO TALLER', 0, 1, 'C', 1)
+            self.ln(4)
+
+    pdf = PDFTaller('L', 'mm', 'A4') 
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, f"Filtros: {limpiar_texto_pdf(texto_filtros)}", 0, 1)
+    pdf.cell(0, 5, f"Total Registros: {len(df_datos)}", 0, 1)
+    pdf.ln(3)
+
+    titulos_pdf = ['PLACA', 'RUTA', 'ZONA', 'ENTRADA', 'SALIDA', 'FALLA', 'MECANICO', 'DURACION', 'ESTATUS']
+    anchos      = [  15,      45,     15,       18,        18,      83,         35,         18,        30   ] 
+    
+    pdf.set_font('Arial', 'B', 8)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.set_text_color(0, 0, 0)
+    for i, col in enumerate(titulos_pdf):
+        pdf.cell(anchos[i], 8, limpiar_texto_pdf(col), 1, 0, 'C', 1)
+    pdf.ln()
+
+    columnas_df = ['Placa', 'Ruta', 'Zona', 'Fecha_Entrada', 'Fecha_Salida', 'Motivo_Falla', 'Taller / Mecánico', 'Duración', 'Estatus_Reparacion']
+    
+    for index, row in df_datos.iterrows():
+        pdf.set_font('Arial', 'B', 7)
+        pdf.set_text_color(0, 0, 0)
+        
+        estado_str = str(row.get('Estatus_Reparacion', '')).strip().upper()
+        if 'TERMINADO' in estado_str: pdf.set_text_color(25, 135, 84)
+        elif 'EN PROCESO' in estado_str: pdf.set_text_color(220, 53, 69)
+        elif '⚠️' in estado_str: pdf.set_text_color(220, 53, 69)
+        else: pdf.set_text_color(0, 0, 0)
+        
+        if '⚠️' in str(row.get('Duración', '')): pdf.set_text_color(220, 53, 69)
+
+        for i, col in enumerate(columnas_df):
+            val = str(row.get(col, ''))
+            texto = limpiar_texto_pdf(val)
+            alineacion = 'C' if col in ['Placa', 'Zona', 'Fecha_Entrada', 'Fecha_Salida', 'Duración', 'Estatus_Reparacion'] else 'L'
+            
+            texto_cortado = texto[:int(anchos[i] * 0.62)]
+            pdf.cell(anchos[i], 6, texto_cortado, 1, 0, alineacion)
+        pdf.ln()
+        
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
         tmp.seek(0)
@@ -344,9 +417,28 @@ def pantalla_login():
     [data-testid="stApp"] { background: radial-gradient(circle at center, #151b26 0%, #080a0e 100%) !important; color: #ffffff; }
     [data-testid="stHeader"] { background-color: transparent !important; }
     [data-testid="stForm"] { background-color: rgba(28, 34, 45, 0.8) !important; border-radius: 20px !important; border: 1px solid rgba(0, 212, 255, 0.2) !important; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px) !important; padding: 40px 30px !important; }
-    [data-testid="stForm"] div[data-baseweb="input"] { background-color: rgba(0, 0, 0, 0.3) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 8px !important; transition: all 0.3s ease !important; }
-    [data-testid="stForm"] div[data-baseweb="input"]:focus-within { border-color: #00d4ff !important; box-shadow: 0 0 8px rgba(0, 212, 255, 0.3) !important; }
-    [data-testid="stForm"] input { color: white !important; }
+    
+    /* ========================================================================= */
+    /* BLINDAJE DE COLORES PARA INPUTS (Soluciona el error en celulares/Dark Mode) */
+    /* ========================================================================= */
+    [data-testid="stForm"] div[data-baseweb="input"] > div { 
+        background-color: #ffffff !important; 
+        border: 2px solid #a0a0a0 !important; 
+        border-radius: 8px !important; 
+        transition: all 0.3s ease !important; 
+    }
+    [data-testid="stForm"] div[data-baseweb="input"] > div:focus-within { 
+        border-color: #00d4ff !important; 
+        box-shadow: 0 0 8px rgba(0, 212, 255, 0.5) !important; 
+    }
+    [data-testid="stForm"] input { 
+        color: #000000 !important; 
+        -webkit-text-fill-color: #000000 !important; 
+        font-weight: bold !important; 
+        background-color: transparent !important; 
+    }
+    /* ========================================================================= */
+
     [data-testid="stForm"] label p { color: #a0a0a0 !important; font-size: 0.9rem !important; }
     [data-testid="stFormSubmitButton"] button { background: linear-gradient(45deg, #0056b3, #00d4ff) !important; border: none !important; border-radius: 8px !important; color: white !important; font-weight: bold !important; letter-spacing: 1px !important; transition: transform 0.2s, box-shadow 0.2s !important; width: 100% !important; margin-top: 10px !important; }
     [data-testid="stFormSubmitButton"] button:hover { transform: translateY(-2px) !important; box-shadow: 0 5px 15px rgba(0, 212, 255, 0.4) !important; }
@@ -363,7 +455,17 @@ def pantalla_login():
         "Supervisor_Oriente": "Oriente27",
         "Supervisor_Centro": "25centro",
         "Supervisor_Occidente": "Occidente26",
-        "Jsuarez": "295377886"
+        "Jsuarez": "295377886",
+        "Franluis_pulve": "456789"
+    }
+
+    nombres_reales = {
+        "David_Admin": "David Mujica",
+        "Supervisor_Oriente": "Javier Hidalgo",
+        "Supervisor_Centro": "Faisal Yordi",
+        "Supervisor_Occidente": "Wiliams Castillo",
+        "Jsuarez": "Jose Suarez",
+        "Franluis_pulve": "Franluis Pulve"
     }
 
     col1, col2, col3 = st.columns([1, 1.5, 1])
@@ -386,6 +488,7 @@ def pantalla_login():
                     with st.spinner("⏳ Verificando credenciales y registrando acceso..."):
                         st.session_state.autenticado = True
                         st.session_state.usuario_actual = usuario_input
+                        st.session_state.nombre_real = nombres_reales.get(usuario_input, usuario_input)
                         
                         try:
                             scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -400,9 +503,7 @@ def pantalla_login():
                             try:
                                 ws_log = libro.worksheet("Registro_Accesos")
                                 ahora = obtener_hora_venezuela()
-                                fecha_str = ahora.strftime("%d/%m/%Y")
-                                hora_str = ahora.strftime("%I:%M %p")
-                                ws_log.append_row([fecha_str, hora_str, usuario_input])
+                                ws_log.append_row([ahora.strftime("%d/%m/%Y"), ahora.strftime("%I:%M %p"), st.session_state.nombre_real])
                             except Exception:
                                 pass 
                         except Exception:
@@ -531,6 +632,9 @@ def modulo_flota():
             with col_tabla2:
                 try:
                     df_export = df_promedios.copy()
+                    df_export['RUTA_STR'] = df_export['RUTA'].astype(str).fillna('')
+                    df_export = df_export.sort_values(by='RUTA_STR', ascending=True).drop(columns=['RUTA_STR'])
+                    
                     wb = openpyxl.load_workbook("INFORME GERENCIAL.xlsx")
                     ws = wb.active 
                     titulo_zona = f"INFORME MENSUAL - RUTA {seleccion.upper()} 2026" if seleccion != "Todos los vehículos" else "INFORME MENSUAL - TODA LA FLOTA 2026"
@@ -581,28 +685,133 @@ def modulo_flota():
 
             df_display = pd.concat([df_display, pd.DataFrame([totals_row])], ignore_index=True)
 
-            def aplicar_estilos_dinamicos(row):
+            def aplicar_estilos_html_flota(row):
                 styles = [''] * len(row)
                 if row['Placa'] == 'TOTALES':
-                    return ['background-color: #ffff00; color: black; font-weight: bold; text-align: center;'] * len(row)
+                    return ['background-color: #ffff00; color: black; font-weight: bold; text-align: center; border: 1px solid black; padding: 10px; font-size: 13px;'] * len(row)
+                
                 for i, col in enumerate(row.index):
-                    if col == 'Estatus GPS': styles[i] = color_gps(row[col]) + ' text-align: center;'
-                    elif col == 'Estatus_Unidad': styles[i] = color_estatus(row[col]) + ' text-align: center;'
+                    base_style = 'border: 1px solid black; text-align: center; padding: 10px; font-size: 13px; color: black; background-color: white;'
+                    
+                    if col == 'Estatus GPS':
+                        color_t = '#198754' if row[col] == 'GPS Operativo' else '#DC3545'
+                        styles[i] = base_style + f' color: {color_t}; font-weight: bold;'
+                    elif col == 'Estatus_Unidad':
+                        val_str = str(row[col]).strip().upper()
+                        if val_str == 'OPERATIVO': styles[i] = base_style + ' color: #198754; font-weight: bold;'
+                        elif val_str == 'NO OPERATIVO': styles[i] = base_style + ' color: #DC3545; font-weight: bold;'
+                        else: styles[i] = base_style
                     elif col in ['RECORRIDO PROMEDIO DIARIO', 'RECORRIDO PROMEDIO SEMANAL', 'RECORRIDO PROMEDIO MENSUAL']:
-                        color = '#1f497d' if 'DIARIO' in col else ('#4f81bd' if 'SEMANAL' in col else '#e46c0a')
-                        styles[i] = f'background-color: {color}; color: white; font-weight: bold; text-align: center;'
-                    else: styles[i] = 'text-align: center;'
+                        bg_color = '#1f497d' if 'DIARIO' in col else ('#4f81bd' if 'SEMANAL' in col else '#e46c0a')
+                        styles[i] = base_style + f' background-color: {bg_color}; color: white; font-weight: bold;'
+                    else: 
+                        styles[i] = base_style
                 return styles
 
-            estilos_tabla = [dict(selector="th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("text-align", "center")])]
-            st.dataframe(df_display.style.apply(aplicar_estilos_dinamicos, axis=1).set_table_styles(estilos_tabla), use_container_width=True, hide_index=True)
+            tabla_html_flota = df_display.style.apply(aplicar_estilos_html_flota, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
+            st.markdown(tabla_html_flota, unsafe_allow_html=True)
 
         with tab2:
             st.subheader("🛠️ Registro Histórico de Mantenimiento")
-            busqueda = st.text_input("🔍 Buscar por Placa (Ej. A0378AK):").upper()
+            
             if not df_historial_taller.empty:
-                df_mostrar_taller = df_historial_taller[df_historial_taller['Placa'].str.contains(busqueda, na=False)] if busqueda else df_historial_taller
-                st.dataframe(df_mostrar_taller.style.set_table_styles(estilos_tabla).map(color_taller, subset=['Estatus_Reparacion']), use_container_width=True, hide_index=True)
+                df_taller_view = df_historial_taller.copy()
+                if 'Placa' in df_taller_view.columns:
+                    df_taller_view = df_taller_view[df_taller_view['Placa'].astype(str).str.strip().str.lower() != 'nan']
+                    df_taller_view = df_taller_view[df_taller_view['Placa'].astype(str).str.strip() != '']
+                
+                if df_taller_view.empty:
+                    st.info("No hay registros de taller en el sistema.")
+                else:
+                    df_taller_view['FECHA_DT'] = pd.to_datetime(df_taller_view['Fecha_Entrada'], dayfirst=True, errors='coerce')
+                    df_taller_view['MES_NUM'] = df_taller_view['FECHA_DT'].dt.month
+                    df_taller_view['MES_NOMBRE'] = df_taller_view['MES_NUM'].map(MESES_ESPANOL).fillna("Desconocido")
+                    df_taller_view['SEMANA'] = df_taller_view['FECHA_DT'].dt.isocalendar().week.astype(str).replace('<NA>', 'Desconocida')
+
+                    st.markdown("#### 🔍 Filtros Avanzados de Taller")
+                    col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+                    
+                    fechas_disp = ["Todas"] + sorted([str(x) for x in df_taller_view['Fecha_Entrada'].unique() if str(x).strip() != ""])
+                    meses_disp = ["Todos"] + sorted(list(set([m for m in df_taller_view['MES_NOMBRE'] if m != "Desconocido"])), key=lambda m: list(MESES_ESPANOL.values()).index(m) if m in MESES_ESPANOL.values() else 0)
+                    semanas_disp = ["Todas"] + sorted([str(x) for x in df_taller_view['SEMANA'].unique() if x != "Desconocida"], reverse=True)
+                    estatus_disp = ["Todos", "En Proceso", "Terminado"]
+                    
+                    with col_t1: f_taller_mes = st.selectbox("📅 Mes de Ingreso:", meses_disp, key="taller_f_mes")
+                    with col_t2: f_taller_sem = st.selectbox("📆 Semana:", semanas_disp, key="taller_f_sem")
+                    with col_t3: f_taller_fec = st.selectbox("📌 Fecha Exacta:", fechas_disp, key="taller_f_fec")
+                    with col_t4: f_taller_est = st.selectbox("⚙️ Estatus:", estatus_disp, key="taller_f_est")
+                    
+                    busqueda_taller = st.text_input("🔎 Búsqueda libre (Placa, Palabra Clave o Mecánico. Ej: Motor):", key="taller_busq").strip().upper()
+
+                    filtros_taller = []
+                    if f_taller_mes and f_taller_mes not in ["Todos", "Todas"]:
+                        df_taller_view = df_taller_view[df_taller_view['MES_NOMBRE'] == f_taller_mes]
+                        filtros_taller.append(f"Mes: {f_taller_mes}")
+                        
+                    if f_taller_sem and f_taller_sem not in ["Todos", "Todas"]:
+                        df_taller_view = df_taller_view[df_taller_view['SEMANA'] == f_taller_sem]
+                        filtros_taller.append(f"Semana: {f_taller_sem}")
+                        
+                    if f_taller_fec and f_taller_fec not in ["Todos", "Todas"]:
+                        df_taller_view = df_taller_view[df_taller_view['Fecha_Entrada'].astype(str).str.strip() == str(f_taller_fec).strip()]
+                        filtros_taller.append(f"Fecha: {f_taller_fec}")
+                        
+                    if f_taller_est and f_taller_est not in ["Todos", "Todas"]:
+                        df_taller_view = df_taller_view[df_taller_view['Estatus_Reparacion'].astype(str).str.strip().str.upper() == str(f_taller_est).strip().upper()]
+                        filtros_taller.append(f"Estatus: {f_taller_est}")
+                        
+                    if busqueda_taller and busqueda_taller != "":
+                        mask = df_taller_view.astype(str).apply(lambda x: x.str.contains(busqueda_taller, case=False)).any(axis=1)
+                        df_taller_view = df_taller_view[mask]
+                        filtros_taller.append(f"Búsqueda: '{busqueda_taller}'")
+                        
+                    texto_filtros_t = " | ".join(filtros_taller) if filtros_taller else "Ninguno (Mostrando todo)"
+                    
+                    cols_a_ocultar = ['FECHA_DT', 'MES_NUM', 'MES_NOMBRE', 'SEMANA']
+                    df_html_taller = df_taller_view.drop(columns=[c for c in cols_a_ocultar if c in df_taller_view.columns])
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    col_m1, col_m2 = st.columns([0.7, 0.3])
+                    with col_m1:
+                        st.metric("Total Registros Encontrados", len(df_html_taller))
+                    with col_m2:
+                        if not df_html_taller.empty:
+                            pdf_taller_bytes = crear_pdf_taller(df_html_taller, texto_filtros_t)
+                            st.download_button(
+                                label="📄 Descargar Historial en PDF",
+                                data=pdf_taller_bytes,
+                                file_name=f"Historial_Taller_{obtener_hora_venezuela().strftime('%d%m%Y')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                type="primary"
+                            )
+
+                    if not df_html_taller.empty:
+                        def aplicar_estilos_html_taller(row):
+                            styles = [''] * len(row)
+                            for i, col in enumerate(row.index):
+                                base_style = 'border: 1px solid black; text-align: center; padding: 10px; font-size: 13px; color: black; background-color: white;'
+                                if col == 'Estatus_Reparacion':
+                                    val_str = str(row[col]).strip().upper()
+                                    if 'TERMINADO' in val_str: styles[i] = base_style + ' color: #198754; font-weight: bold; background-color: #E8F5E9;'
+                                    elif 'EN PROCESO' in val_str: styles[i] = base_style + ' color: #DC3545; font-weight: bold; background-color: #FFEFEF;'
+                                    elif '⚠️' in val_str: styles[i] = base_style + ' color: #DC3545; font-weight: bold; background-color: #FFF3CD;'
+                                    else: styles[i] = base_style
+                                elif col == 'Duración' and '⚠️' in str(row[col]):
+                                    styles[i] = base_style + ' color: #DC3545; font-weight: bold; background-color: #FFF3CD;'
+                                elif col in ['Motivo_Falla', 'Taller / Mecánico']:
+                                    styles[i] = base_style + ' text-align: left;'
+                                else:
+                                    styles[i] = base_style
+                            return styles
+
+                        tabla_html_taller = df_html_taller.style.apply(aplicar_estilos_html_taller, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
+                        st.markdown(tabla_html_taller, unsafe_allow_html=True)
+                    else:
+                        st.info("No hay registros que coincidan con los filtros de taller seleccionados.")
+            else:
+                st.info("No hay registros de taller en el sistema.")
+
     except Exception as e:
         st.error(f"Error cargando los datos de Flota: {e}")
 
@@ -648,8 +857,17 @@ def modulo_personal():
 
         st.divider()
 
+        def estilo_personal_html(row):
+            styles = [''] * len(row)
+            for i, col in enumerate(row.index):
+                base_style = 'border: 1px solid black; text-align: center; padding: 10px; font-size: 13px; color: black; background-color: white;'
+                if col == 'OBSERVACIÓN':
+                    styles[i] = base_style + ' text-align: left; font-style: italic;'
+                else:
+                    styles[i] = base_style
+            return styles
+
         tab_choferes, tab_ayudantes = st.tabs(["🚛 Gestión de Choferes", "👷 Gestión de Ayudantes"])
-        estilos_tabla_personal = [dict(selector="th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("text-align", "center")])]
 
         with tab_choferes:
             if not df_choferes.empty:
@@ -724,8 +942,11 @@ def modulo_personal():
                         columnas_mostrar = ['FECHA', 'DIA', 'UNIDAD', 'RUTA', 'ZONA', 'OBSERVACIÓN']
                         cols_existentes = [c for c in columnas_mostrar if c in df_ind.columns]
                         df_view = df_ind[cols_existentes]
-                        st.dataframe(df_view.style.set_table_styles(estilos_tabla_personal), use_container_width=True, hide_index=True)
                         
+                        tabla_html_chofer = df_view.style.apply(estilo_personal_html, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
+                        st.markdown(tabla_html_chofer, unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
                         pdf_bytes = crear_pdf_operativo(chofer_sel, "Chofer", df_view, total_dias, dias_activos, dias_inactivos, mes_seleccionado, texto_filtros)
                         st.download_button(label=f"📥 Descargar PDF Gerencial", data=pdf_bytes, file_name=f"Perfil_{chofer_sel.replace(' ', '_')}.pdf", mime="application/pdf", use_container_width=True)
 
@@ -792,8 +1013,11 @@ def modulo_personal():
                         columnas_mostrar = ['FECHA', 'DIA', 'CHOFER', 'UNIDAD', 'RUTA', 'ZONA', 'OBSERVACIÓN']
                         cols_existentes = [c for c in columnas_mostrar if c in df_ind.columns]
                         df_view = df_ind[cols_existentes]
-                        st.dataframe(df_view.style.set_table_styles(estilos_tabla_personal), use_container_width=True, hide_index=True)
                         
+                        tabla_html_ayu = df_view.style.apply(estilo_personal_html, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
+                        st.markdown(tabla_html_ayu, unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
                         pdf_bytes = crear_pdf_operativo(ayu_sel, "Ayudante", df_view, total_dias, dias_activos, dias_inactivos, mes_seleccionado, texto_filtros_a)
                         st.download_button(label=f"📥 Descargar PDF Gerencial", data=pdf_bytes, file_name=f"Perfil_{ayu_sel.replace(' ', '_')}.pdf", mime="application/pdf", use_container_width=True)
 
@@ -803,24 +1027,51 @@ def modulo_personal():
 # --- 7.5. MÓDULO 3: TORRE DE CONTROL (DASHBOARD GERENCIAL) ---
 @st.fragment(run_every="5m")
 def modulo_torre_control():
-    # --- MEJORA: EVITAR EL "DEAD ZONE" DEL BOTÓN DEPLOY EN LA ESQUINA DERECHA ---
-    col_titulo, col_boton, col_vacia = st.columns([0.65, 0.25, 0.1])
+    col_titulo, col_boton, col_reloj = st.columns([0.60, 0.20, 0.20])
     with col_titulo:
         st.title("📡 MÓDULO: TORRE DE CONTROL DROTACA")
     with col_boton:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Actualizar Pizarras", use_container_width=True):
             st.rerun() 
+            
+    with col_reloj:
+        if st.session_state.usuario_actual in ["David_Admin", "Jsuarez", "Franluis_pulve"]:
+            st.markdown("<br>", unsafe_allow_html=True)
+            id_reloj = time.time() 
+            codigo_html_reloj = f"""
+            <div style="font-family: sans-serif; text-align: center; background-color: #E8F5E9; padding: 5px; border-radius: 8px; border: 2px solid #198754; color: #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <span style="font-size: 11px; font-weight: bold; text-transform: uppercase;">⏱️ Próxima lectura en:</span><br>
+                <span id="reloj_{id_reloj}" style="font-size: 22px; font-weight: 900; letter-spacing: 2px;">05:00</span>
+            </div>
+            <script>
+                let tiempo = 300; 
+                const elemento = document.getElementById('reloj_{id_reloj}');
+                const intervalo = setInterval(() => {{
+                    tiempo--;
+                    if (tiempo <= 0) {{
+                        tiempo = 0; 
+                        elemento.innerText = "Cargando...";
+                        elemento.style.fontSize = "16px";
+                        clearInterval(intervalo);
+                    }} else {{
+                        let m = Math.floor(tiempo / 60);
+                        let s = tiempo % 60;
+                        elemento.innerText = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+                    }}
+                }}, 1000);
+            </script>
+            """
+            components.html(codigo_html_reloj, height=70)
+            
     st.markdown("---")
 
-    # --- CONFIGURACIÓN MAESTRA DE PIZARRAS ---
     config_pizarras_todas = {
         "Occidente": {"titulo": "RUTA OCCIDENTE", "responsable": "Jesus Brito"},
         "Centro": {"titulo": "RUTA CENTRO", "responsable": "Jerald Poche"},
         "Oriente": {"titulo": "RUTA ORIENTE", "responsable": "Gabriel Vera"}
     }
 
-    # --- MEJORA: CONTROL DE ACCESO BASADO EN ROLES (RBAC) ---
     usuario = st.session_state.usuario_actual
     if usuario == "Supervisor_Oriente":
         config_pizarras = {"Oriente": config_pizarras_todas["Oriente"]}
@@ -829,7 +1080,6 @@ def modulo_torre_control():
     elif usuario == "Supervisor_Occidente":
         config_pizarras = {"Occidente": config_pizarras_todas["Occidente"]}
     else:
-        # David_Admin y Jsuarez tienen pase VIP a todas las pizarras
         config_pizarras = config_pizarras_todas
 
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -839,21 +1089,19 @@ def modulo_torre_control():
     except:
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
         
-    # --- SISTEMA ANTICHOQUES (REINTENTOS DE CONEXIÓN A LA API) ---
     libro = None
     for intento in range(3):
         try:
             cliente = gspread.authorize(creds)
             libro = cliente.open("Sistema_Flota_2026")
-            break # Si se conecta, rompe el ciclo y continúa
+            break 
         except Exception as e:
             if intento < 2:
-                time.sleep(3) # Espera 3 segundos si hay choque con el bot local
+                time.sleep(3) 
             else:
                 st.warning("⚠️ Google Sheets está ocupado sincronizando las pizarras locales. Se recuperará automáticamente en el próximo ciclo.")
                 return
 
-    # FASE 1.5: RECOPILAR NOVEDADES EXCLUSIVAS DEL DÍA
     novedades_del_dia = {"Occidente": 0, "Centro": 0, "Oriente": 0}
     fecha_hoy_str = obtener_hora_venezuela().strftime("%d/%m/%Y")
     
@@ -872,7 +1120,6 @@ def modulo_torre_control():
     except Exception:
         pass
 
-    # FASE 1: RECOPILACIÓN DE DATOS
     datos_por_zona = {}
     global_cubiertos = 0
     global_bultos = 0
@@ -899,21 +1146,18 @@ def modulo_torre_control():
         except:
             pass
 
-    # FASE 2: RENDERIZADO DEL RESUMEN GLOBAL (DINÁMICO POR ROL)
-    if usuario in ["David_Admin", "Jsuarez"]:
-        st.markdown("### 🌎 Resumen Global de Operaciones (Toda la Flota)")
+    if usuario in ["David_Admin", "Jsuarez", "Franluis_pulve"]:
+        st.markdown("### 🌎 Panorama Operativo Global")
     else:
-        # Extrae el nombre de la zona (ej. "Oriente")
         zona_texto = list(config_pizarras.keys())[0]
-        st.markdown(f"### 🌎 Resumen Operativo: RUTA {zona_texto.upper()}")
+        st.markdown(f"### 🌎 Panorama Operativo: RUTA {zona_texto.upper()}")
         
     col_g1, col_g2, col_g3 = st.columns(3)
-    col_g1.metric("📅 Despacho del Día", fecha_hoy_str)
-    col_g2.metric("✅ Total Clientes Cubiertos", f"{int(global_cubiertos)} Clientes")
-    col_g3.metric("📦 Total Bultos Entregados", f"{int(global_bultos)} Bultos")
+    col_g1.metric("🗓️ Jornada Activa", fecha_hoy_str)
+    col_g2.metric("✅ Alcance de Clientes", f"{int(global_cubiertos)} Clientes")
+    col_g3.metric("📦 Volumen Distribuido", f"{int(global_bultos)} Bultos")
     st.markdown("---")
 
-    # FASE 3: RENDERIZADO DE LAS PIZARRAS INDIVIDUALES
     for zona, data in datos_por_zona.items():
         st.markdown(f"### 📍 PIZARRA {data['titulo']}")
         col_res, col_hora, _ = st.columns([2, 2, 4])
@@ -938,7 +1182,6 @@ def modulo_torre_control():
         sum_pendientes = pd.to_numeric(df_zona[c_pendientes], errors='coerce').fillna(0).sum() if c_pendientes else 0
         sum_bultos = pd.to_numeric(df_zona[c_bultos], errors='coerce').fillna(0).sum() if c_bultos else 0
 
-        # Fila TOTALES
         fila_totales = {col: "" for col in df_zona.columns}
         fila_totales[primer_columna] = "TOTALES"
         if c_cubrir: fila_totales[c_cubrir] = int(sum_cubrir)
@@ -959,7 +1202,7 @@ def modulo_torre_control():
                         styles[i] = base_style_total + 'background-color: #1A3B5C; color: white;'
             else:
                 for i, col in enumerate(row.index):
-                    base_style = 'text-align: center; border: 1px solid black; '
+                    base_style = 'text-align: center; border: 1px solid black; background-color: white; color: black; '
                     if col in [c_cubrir, c_cubiertos, c_pendientes, c_bultos] and col:
                         base_style += 'font-size: 20px; font-weight: bold; '
                     
@@ -974,17 +1217,11 @@ def modulo_torre_control():
                     else:
                         styles[i] = base_style
             return styles
-
-        estilos_html_css = [
-            dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black")]),
-            dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "10px"), ("border", "1px solid black"), ("font-size", "13px")]),
-            dict(selector="tbody td", props=[("border", "1px solid black"), ("padding", "8px"), ("font-size", "13px")])
-        ]
         
         col_tabla, col_grafico = st.columns([0.8, 0.2])
         
         with col_tabla:
-            tabla_html = df_zona.style.apply(estilo_pizarra_html, axis=1).set_table_styles(estilos_html_css).hide(axis="index").to_html()
+            tabla_html = df_zona.style.apply(estilo_pizarra_html, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
             st.markdown(tabla_html, unsafe_allow_html=True)
             
         with col_grafico:
@@ -1116,19 +1353,13 @@ def modulo_novedades():
 
     if not df_filtrado.empty:
         def estilo_novedades(row):
-            styles = ['border: 1px solid black; text-align: center; font-size: 14px;'] * len(row)
+            styles = ['border: 1px solid black; text-align: center; font-size: 14px; color: black; background-color: white;'] * len(row)
             for i, col in enumerate(row.index):
                 if col == 'DESCRIPCIÓN':
-                    styles[i] = 'border: 1px solid black; text-align: left; font-size: 14px; padding: 10px; font-style: italic; background-color: #F8F9FA;' 
+                    styles[i] = 'border: 1px solid black; text-align: left; font-size: 14px; padding: 10px; font-style: italic; background-color: #F8F9FA; color: black;' 
             return styles
-
-        estilos_html = [
-            dict(selector="table", props=[("width", "100%"), ("border-collapse", "collapse"), ("font-family", "sans-serif"), ("border", "1px solid black")]),
-            dict(selector="thead th", props=[("background-color", "#1A3B5C"), ("color", "white"), ("font-weight", "bold"), ("text-align", "center"), ("padding", "12px"), ("border", "1px solid black"), ("font-size", "14px")]),
-            dict(selector="tbody td", props=[("border", "1px solid black"), ("padding", "8px")])
-        ]
         
-        tabla_html = df_filtrado.style.apply(estilo_novedades, axis=1).set_table_styles(estilos_html).hide(axis="index").to_html()
+        tabla_html = df_filtrado.style.apply(estilo_novedades, axis=1).set_table_styles(estilos_html_genericos).hide(axis="index").to_html()
         st.markdown(tabla_html, unsafe_allow_html=True)
     else:
         st.info("No hay resultados para los filtros seleccionados.")
@@ -1141,18 +1372,16 @@ else:
     <style>
     [data-testid="stApp"] { background: #F0F4F8 !important; color: #31333F !important; }
     [data-testid="stHeader"] { background-color: transparent !important; }
-    /* MAGIA: Ocultar el botón "Deploy" que estorba en la esquina */
     .stAppDeployButton {display:none;}
     </style>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
-        st.markdown(f"### 👤 Usuario:\n**{st.session_state.usuario_actual}**")
+        st.markdown(f"### 👤 Usuario:\n**{st.session_state.nombre_real}**")
         st.divider()
         st.markdown("### 🗂️ Módulos del Sistema")
-        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control", "🚨 Novedades en Ruta"])
+        menu_seleccionado = st.radio("", ["🚛 Control de Flota", "👥 Rotación de Personal", "🗼 Torre de Control", "🚨 Novedades en Ruta", "🛒 Requisiciones y Compras"])
         
-        # --- MEJORA 1: ACCESO EXCLUSIVO AL INTERRUPTOR DE BOTS (SOLO DAVID_ADMIN) ---
         if st.session_state.usuario_actual == "David_Admin":
             st.divider()
             st.markdown("### 🤖 Control de Bots (Pizarras)")
@@ -1178,38 +1407,13 @@ else:
             except Exception as e:
                 st.caption("⚠️ No se pudo cargar el estado de los bots. Verifica la hoja 'Configuracion'.")
                 
-        # --- MEJORA 2: CRONÓMETRO VISUAL EXCLUSIVO (Para Admin y Jsuarez) ---
-        if st.session_state.usuario_actual in ["David_Admin", "Jsuarez"]:
-            # Solo ponemos divisor si Jsuarez lo está viendo (para no poner dos divisores seguidos a David_Admin)
-            if st.session_state.usuario_actual == "Jsuarez":
-                st.divider()
-                
-            st.markdown("<br>", unsafe_allow_html=True)
-            components.html("""
-            <div style="font-family: sans-serif; text-align: center; background-color: #E8F5E9; padding: 12px; border-radius: 8px; border: 2px solid #198754; color: #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <span style="font-size: 13px; font-weight: bold; text-transform: uppercase;">⏱️ Próxima lectura a BD en:</span><br>
-                <span id="reloj" style="font-size: 28px; font-weight: 900; letter-spacing: 2px;">05:00</span>
-            </div>
-            <script>
-                let tiempo = 300; // 300 segundos = 5 minutos exactos
-                const elemento = document.getElementById('reloj');
-                setInterval(() => {
-                    tiempo--;
-                    if (tiempo <= 0) tiempo = 300; // Reinicia el ciclo visual
-                    let m = Math.floor(tiempo / 60);
-                    let s = tiempo % 60;
-                    elemento.innerText = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-                }, 1000);
-            </script>
-            """, height=100)
-
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True, type="primary"):
             st.session_state.autenticado = False
             st.session_state.usuario_actual = ""
+            st.session_state.nombre_real = ""
             st.rerun()
 
-    # --- RUTEO DE LA APLICACIÓN ---
     if menu_seleccionado == "🚛 Control de Flota":
         modulo_flota()
     elif menu_seleccionado == "👥 Rotación de Personal":
@@ -1218,3 +1422,5 @@ else:
         modulo_torre_control()
     elif menu_seleccionado == "🚨 Novedades en Ruta":
         modulo_novedades()
+    elif menu_seleccionado == "🛒 Requisiciones y Compras":
+        renderizar_modulo_compras()
